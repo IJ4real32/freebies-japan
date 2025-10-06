@@ -1,0 +1,17 @@
+﻿{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "jsx": "react-jsx",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/*"] },
+    "noEmit": true  // ← ADD THIS LINE
+  },
+  "include": ["src"],
+  "exclude": ["functions"]
+}
