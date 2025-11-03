@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import onboardingSlides from '../data/onboardingSlides';
+import onboardingSlides from '../pages/OnboardingSlides';
 import { useTranslation } from '../hooks/useTranslation';
 
 const LandingPage = () => {

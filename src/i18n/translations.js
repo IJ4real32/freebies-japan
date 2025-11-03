@@ -2,13 +2,24 @@
 
 const translations = {
   en: {
+    // --- Auth / Navigation ---
     login: "Login",
     signup: "Sign Up",
     logout: "Logout",
+    logging_out: "Logging out…",
+    admin: "Admin",
+    admin_login: "Admin Login",
     profile: "Profile",
     donate: "Donate",
     items: "Items",
+    health: "Health",
+
+    // alias (navbar/pages sometimes use snake_case)
+    my_requests: "My Requests",
+    // original key kept for backward-compat
     myRequests: "My Requests",
+
+    // --- Dashboard / Labels ---
     adminDashboard: "Admin Dashboard",
     language: "Language",
     welcome: "Welcome to Freebies Japan 👋",
@@ -22,6 +33,8 @@ const translations = {
     unverified: "Unverified",
     verifyEmail: "Verify Email",
     sending: "Sending...",
+
+    // --- Profile / Address ---
     defaultDeliveryInfo: "Default Delivery Info",
     zipCode: "ZIP Code",
     address: "Address",
@@ -36,6 +49,8 @@ const translations = {
     addressValidationError: "ZIP Code, Address, and Phone are required",
     myProfile: "My Profile",
     selectAvatar: "Select Your Avatar",
+
+    // --- Items / Donate form ---
     itemTitle: "Title",
     itemDescription: "Description",
     itemCategory: "Category",
@@ -47,16 +62,43 @@ const translations = {
     requestStatusNote: "Note:",
     deliverySummary: "Delivery Summary",
     addDeliveryInfo: "Add Delivery Info",
-    edit: "Edit"
+    edit: "Edit",
+
+    // --- Landing / Onboarding ---
+    back: "Back",
+    next: "Next",
+    skip: "Skip",
+    browse_items: "Browse Items",
+    donate_item: "Donate an Item",
+    landing_title_1: "Welcome to Freebies Japan",
+    landing_desc_1:
+      "Discover free and premium items donated by the community. Join lotteries for free items or purchase premium with bank deposit.",
+    landing_title_2: "Free Items via Lottery",
+    landing_desc_2:
+      "Request a free item by entering a ticket. Winners are selected fairly when the selection closes.",
+    landing_title_3: "Premium Items with Deposit",
+    landing_desc_3:
+      "See bank details, pay by deposit, and report your payment. Admins verify and notify you when it’s ready.",
   },
+
   ja: {
+    // --- Auth / Navigation ---
     login: "ログイン",
     signup: "新規登録",
     logout: "ログアウト",
+    logging_out: "ログアウト中…",
+    admin: "管理",
+    admin_login: "管理者ログイン",
     profile: "プロフィール",
     donate: "寄付する",
     items: "アイテム一覧",
-    myRequests: "リクエスト履歴",
+    health: "ヘルスチェック",
+
+    // alias + original
+    
+"My Activity": "マイアクティビティ",
+
+    // --- Dashboard / Labels ---
     adminDashboard: "管理者ダッシュボード",
     language: "言語",
     welcome: "Freebies Japan へようこそ 👋",
@@ -70,6 +112,8 @@ const translations = {
     unverified: "未確認",
     verifyEmail: "メールを確認",
     sending: "送信中...",
+
+    // --- Profile / Address ---
     defaultDeliveryInfo: "配送情報",
     zipCode: "郵便番号",
     address: "住所",
@@ -84,6 +128,10 @@ const translations = {
     addressValidationError: "郵便番号、住所、電話番号は必須です。",
     myProfile: "マイプロフィール",
     selectAvatar: "アバターを選択してください",
+
+
+    
+    // --- Items / Donate form ---
     itemTitle: "タイトル",
     itemDescription: "説明",
     itemCategory: "カテゴリ",
@@ -95,89 +143,25 @@ const translations = {
     requestStatusNote: "注釈:",
     deliverySummary: "配送概要",
     addDeliveryInfo: "配送情報を追加",
-    edit: "編集"
+    edit: "編集",
+
+    
+    // --- Landing / Onboarding ---
+    back: "戻る",
+    next: "次へ",
+    skip: "スキップ",
+    browse_items: "アイテムを見る",
+    donate_item: "アイテムを寄付する",
+    landing_title_1: "Freebies Japan へようこそ",
+    landing_desc_1:
+      "コミュニティから寄付された無料・プレミアム品を見つけよう。無料品は抽選に参加、プレミアムは振込で購入できます。",
+    landing_title_2: "無料アイテムは抽選で",
+    landing_desc_2:
+      "無料アイテムはチケットを提出して参加。締切後、公平に当選者が選ばれます。",
+    landing_title_3: "プレミアムは振込で",
+    landing_desc_3:
+      "銀行振込の詳細を確認して入金し、支払い報告を送信。管理者が確認後、準備完了の連絡が届きます。",
   },
-  zh: {
-    login: "登录",
-    signup: "注册",
-    logout: "登出",
-    profile: "个人资料",
-    donate: "捐赠",
-    items: "物品",
-    myRequests: "我的请求",
-    adminDashboard: "管理员面板",
-    language: "语言",
-    welcome: "欢迎来到 Freebies Japan 👋",
-    donateHeader: "赋予闲置物品新生命 ♻️",
-    requestHeader: "免费寻找您所需 🍭",
-    loading: "加载中...",
-    itemTitle: "标题",
-    itemDescription: "描述",
-    itemCategory: "类别",
-    itemCondition: "状况",
-    itemDeliveryMethod: "送货方式",
-    itemImages: "图片",
-    itemSubmit: "提交捐赠",
-    noRequests: "未找到请求",
-    requestStatusNote: "备注:",
-    deliverySummary: "送货摘要",
-    addDeliveryInfo: "添加送货信息",
-    edit: "编辑"
-  },
-  tl: {
-    login: "Mag-login",
-    signup: "Mag-sign Up",
-    logout: "Mag-logout",
-    profile: "Profile",
-    donate: "Mag-donate",
-    items: "Mga Item",
-    myRequests: "Aking Mga Kahilingan",
-    adminDashboard: "Admin Dashboard",
-    language: "Wika",
-    welcome: "Maligayang pagdating sa Freebies Japan 👋",
-    donateHeader: "Bigyan ng bagong buhay ang mga hindi ginagamit na gamit ♻️",
-    requestHeader: "Hanapin ang kailangan mo ng libre 🍭",
-    loading: "Naglo-load...",
-    itemTitle: "Pamagat",
-    itemDescription: "Paglalarawan",
-    itemCategory: "Kategorya",
-    itemCondition: "Kondisyon",
-    itemDeliveryMethod: "Pamamaraan ng Paghahatid",
-    itemImages: "Mga Larawan",
-    itemSubmit: "Isumite ang Donasyon",
-    noRequests: "Walang nahanap na mga kahilingan",
-    requestStatusNote: "Tala:",
-    deliverySummary: "Buod ng Paghahatid",
-    addDeliveryInfo: "Magdagdag ng Impormasyon sa Paghahatid",
-    edit: "I-edit"
-  },
-  vi: {
-    login: "Đăng nhập",
-    signup: "Đăng ký",
-    logout: "Đăng xuất",
-    profile: "Hồ sơ",
-    donate: "Quyên góp",
-    items: "Mặt hàng",
-    myRequests: "Yêu cầu của tôi",
-    adminDashboard: "Bảng điều khiển quản trị",
-    language: "Ngôn ngữ",
-    welcome: "Chào mừng đến với Freebies Japan 👋",
-    donateHeader: "Mang lại cuộc sống mới cho đồ không sử dụng ♻️",
-    requestHeader: "Tìm những gì bạn cần miễn phí 🍭",
-    loading: "Đang tải...",
-    itemTitle: "Tiêu đề",
-    itemDescription: "Mô tả",
-    itemCategory: "Danh mục",
-    itemCondition: "Tình trạng",
-    itemDeliveryMethod: "Phương thức giao hàng",
-    itemImages: "Hình ảnh",
-    itemSubmit: "Gửi quyên góp",
-    noRequests: "Không tìm thấy yêu cầu nào",
-    requestStatusNote: "Ghi chú:",
-    deliverySummary: "Tóm tắt giao hàng",
-    addDeliveryInfo: "Thêm thông tin giao hàng",
-    edit: "Chỉnh sửa"
-  }
 };
 
 export default translations;

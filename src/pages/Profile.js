@@ -1,86 +1,88 @@
 // ✅ FILE: src/pages/Profile.jsx
-
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { useAuth } from '../contexts/AuthContext';
-import { db } from '../firebase';
-import { doc, updateDoc } from 'firebase/firestore';
-import { sendEmailVerification } from 'firebase/auth';
-import { useTranslation } from '../hooks/useTranslation';
+import React, { useState, useEffect } from "react";
+import axios from "axios";
+import { useAuth } from "../contexts/AuthContext";
+import { db } from "../firebase";
+import { doc, updateDoc } from "firebase/firestore";
+import { sendEmailVerification } from "firebase/auth";
+import { useTranslation } from "../hooks/useTranslation";
 
 const avatarOptions = Array.from({ length: 10 }, (_, i) => ({
   label: `Avatar ${i + 1}`,
   url: `/avatars/avatar${i + 1}.png`,
 }));
 
-const Profile = () => {
+export default function Profile() {
   const { currentUser, refreshUser } = useAuth();
   const { t } = useTranslation();
+
   const [formData, setFormData] = useState({
-    zipCode: '',
-    address: '',
-    roomNumber: '',
-    phone: '',
+    zipCode: "",
+    address: "",
+    roomNumber: "",
+    phone: "",
   });
-  const [avatarURL, setAvatarURL] = useState('');
+  const [avatarURL, setAvatarURL] = useState("/avatars/avatar1.png");
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sendingVerification, setSendingVerification] = useState(false);
 
   useEffect(() => {
-    if (currentUser) {
-      const defaultData = currentUser.defaultAddress || {
-        zipCode: '',
-        address: '',
-        roomNumber: '',
-        phone: '',
-      };
-      setFormData(defaultData);
-      setAvatarURL(currentUser.avatar || '/avatars/avatar1.png');
-    }
+    if (!currentUser) return;
+    setFormData({
+      zipCode: currentUser?.defaultAddress?.zipCode || "",
+      address: currentUser?.defaultAddress?.address || "",
+      roomNumber: currentUser?.defaultAddress?.roomNumber || "",
+      phone: currentUser?.defaultAddress?.phone || "",
+    });
+    setAvatarURL(currentUser?.avatar || "/avatars/avatar1.png");
+    setLoading(false);
   }, [currentUser]);
 
   useEffect(() => {
-    const fetchAddress = async () => {
-      if (formData.zipCode.length === 7 && /^\d+$/.test(formData.zipCode)) {
+    if (formData.zipCode.length === 7 && /^\d+$/.test(formData.zipCode)) {
+      const fetchAddress = async () => {
         try {
-          const response = await axios.get(
+          const { data } = await axios.get(
             `https://zipcloud.ibsnet.co.jp/api/search?zipcode=${formData.zipCode}`
           );
-          const result = response.data.results?.[0];
+          const result = data.results?.[0];
           if (result) {
-            const fullAddress = `${result.address1} ${result.address2} ${result.address3}`;
-            setFormData(prev => ({ ...prev, address: fullAddress }));
+            const fullAddress = `${result.address1}${result.address2}${result.address3}`;
+            setFormData((prev) => ({ ...prev, address: fullAddress }));
           }
         } catch (err) {
-          console.error('ZIP lookup failed', err);
+          console.error("ZIP lookup failed", err);
         }
-      }
-    };
-    const timer = setTimeout(fetchAddress, 500);
-    return () => clearTimeout(timer);
+      };
+      const timer = setTimeout(fetchAddress, 400);
+      return () => clearTimeout(timer);
+    }
   }, [formData.zipCode]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleSave = async () => {
+    if (!currentUser?.uid) return;
     if (!formData.zipCode || !formData.address || !formData.phone) {
-      alert(t('addressValidationError'));
+      alert(t("addressValidationError"));
       return;
     }
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'users', currentUser.uid), {
+      await updateDoc(doc(db, "users", currentUser.uid), {
         avatar: avatarURL,
         defaultAddress: formData,
+        updatedAt: new Date(),
       });
-      await refreshUser();
-      alert(t('profileUpdated'));
+      if (refreshUser) await refreshUser();
+      alert(t("profileUpdated"));
     } catch (err) {
-      console.error('Profile update failed', err);
-      alert(t('profileUpdateError'));
+      console.error("Profile update failed", err);
+      alert(t("profileUpdateError"));
     } finally {
       setSaving(false);
     }
@@ -90,101 +92,137 @@ const Profile = () => {
     setSendingVerification(true);
     try {
       await sendEmailVerification(currentUser);
-      alert(t('verificationSent'));
+      alert(t("verificationSent"));
     } catch (err) {
-      console.error('Verification email error', err);
-      alert(t('verificationFailed'));
+      console.error("Verification email error", err);
+      alert(t("verificationFailed"));
     } finally {
       setSendingVerification(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-white pt-20">
-      <main className="max-w-xl mx-auto px-4 py-8">
-        <h1 className="text-2xl font-bold mb-6">{t('myProfile')}</h1>
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-gray-600">
+        {t("loading")}...
+      </div>
+    );
+  }
 
-        <h3 className="text-sm font-medium mb-2">{t('selectAvatar')}</h3>
-        <div className="grid grid-cols-5 gap-4 mb-6">
-          {avatarOptions.map(option => (
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pt-20 pb-16 px-4">
+      <main className="max-w-2xl mx-auto bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-100 dark:border-gray-700 p-6 sm:p-8">
+        <h1 className="text-2xl font-bold text-gray-800 dark:text-white mb-6 text-center">
+          {t("myProfile")}
+        </h1>
+
+        {/* ✅ Avatar Picker */}
+        <h3 className="text-sm font-medium mb-2 text-gray-700 dark:text-gray-200 text-center">
+          {t("selectAvatar")}
+        </h3>
+        <div className="grid grid-cols-5 gap-3 mb-6 place-items-center">
+          {avatarOptions.map((option) => (
             <img
               key={option.url}
               src={option.url}
               alt={option.label}
               onClick={() => setAvatarURL(option.url)}
-              className={`w-16 h-16 rounded-full cursor-pointer border-2 object-cover ${
-                avatarURL === option.url ? 'border-blue-500' : 'border-gray-300'
+              onError={(e) => {
+                e.currentTarget.src = "/avatars/avatar1.png";
+              }}
+              className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full cursor-pointer border-2 object-cover transition-transform duration-150 hover:scale-105 ${
+                avatarURL === option.url
+                  ? "border-indigo-500 ring-2 ring-indigo-200"
+                  : "border-gray-300 dark:border-gray-600"
               }`}
             />
           ))}
         </div>
 
-        <div className="mb-4">
-          <p><strong>Email:</strong> {currentUser?.email}</p>
+        {/* ✅ Email Section */}
+        <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 mb-6 text-sm text-gray-700 dark:text-gray-200">
+          <p className="mb-1">
+            <strong>Email:</strong> {currentUser?.email}
+          </p>
           <p>
-            <strong>{t('status')}:</strong>{' '}
+            <strong>{t("status")}:</strong>{" "}
             {currentUser?.emailVerified ? (
-              <span className="text-green-600">{t('verified')}</span>
+              <span className="text-green-600 dark:text-green-400">
+                {t("verified")}
+              </span>
             ) : (
               <>
-                <span className="text-red-600">{t('unverified')}</span>
+                <span className="text-red-600 dark:text-red-400">
+                  {t("unverified")}
+                </span>
                 <button
                   onClick={handleSendEmailVerification}
                   disabled={sendingVerification}
-                  className="ml-2 text-blue-600 underline text-sm"
+                  className="ml-2 text-indigo-600 dark:text-indigo-400 underline text-xs font-medium"
                 >
-                  {sendingVerification ? t('sending') : t('verifyEmail')}
+                  {sendingVerification ? t("sending") : t("verifyEmail")}
                 </button>
               </>
             )}
           </p>
         </div>
 
-        <h2 className="text-lg font-semibold mt-6 mb-3">{t('defaultDeliveryInfo')}</h2>
+        {/* ✅ Default Delivery Info */}
+        <h2 className="text-lg font-semibold mt-4 mb-3 text-gray-800 dark:text-white">
+          {t("defaultDeliveryInfo")}
+        </h2>
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1">{t('zipCode')} *</label>
+            <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
+              {t("zipCode")} *
+            </label>
             <input
               type="text"
               name="zipCode"
               value={formData.zipCode}
               onChange={handleChange}
-              className="w-full border rounded px-3 py-2 text-sm"
+              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 focus:ring-2 focus:ring-indigo-500 outline-none"
               maxLength="7"
               placeholder="1234567"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">{t('address')} *</label>
+            <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
+              {t("address")} *
+            </label>
             <input
               type="text"
               name="address"
               value={formData.address}
               onChange={handleChange}
-              className="w-full border rounded px-3 py-2 text-sm"
+              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 focus:ring-2 focus:ring-indigo-500 outline-none"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">{t('roomBuilding')}</label>
+            <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
+              {t("roomBuilding")}
+            </label>
             <input
               type="text"
               name="roomNumber"
               value={formData.roomNumber}
               onChange={handleChange}
-              className="w-full border rounded px-3 py-2 text-sm"
+              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 focus:ring-2 focus:ring-indigo-500 outline-none"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">{t('phone')} *</label>
+            <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
+              {t("phone")} *
+            </label>
             <input
               type="tel"
               name="phone"
               value={formData.phone}
               onChange={handleChange}
-              className="w-full border rounded px-3 py-2 text-sm"
+              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 focus:ring-2 focus:ring-indigo-500 outline-none"
               placeholder="08012345678"
             />
           </div>
@@ -193,13 +231,15 @@ const Profile = () => {
         <button
           onClick={handleSave}
           disabled={saving}
-          className="mt-6 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm"
+          className={`mt-6 w-full py-2.5 rounded-full text-white font-semibold transition ${
+            saving
+              ? "bg-gray-400 cursor-not-allowed"
+              : "bg-indigo-600 hover:bg-indigo-700"
+          }`}
         >
-          {saving ? t('saving') : t('saveChanges')}
+          {saving ? t("saving") : t("saveChanges")}
         </button>
       </main>
     </div>
   );
-};
-
-export default Profile;
+}

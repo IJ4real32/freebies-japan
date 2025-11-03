@@ -1,44 +1,41 @@
 // ✅ FILE: src/pages/Admin/PaymentsQueue.jsx
-import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where, orderBy, limit } from 'firebase/firestore';
-import { db } from '../../firebase';
-import PaymentReviewCard from './PaymentReviewCard';
+import React, { useEffect, useState } from "react";
+import PaymentReviewCard from "./PaymentReviewCard";
+import { adminGetPaymentQueue } from "../../services/functionsApi";
+import toast from "react-hot-toast";
 
 export default function PaymentsQueue() {
   const [payments, setPayments] = useState([]);
-  const [filter, setFilter] = useState('reported'); // 'reported' | 'pending' | 'all'
-  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState("reported"); // reported | pending | all
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let q;
-    if (filter === 'reported') {
-      q = query(
-        collection(db, 'payments'),
-        where('status', '==', 'reported'),
-        orderBy('createdAt', 'desc'),
-        limit(50)
-      );
-    } else if (filter === 'pending') {
-      q = query(
-        collection(db, 'payments'),
-        where('status', '==', 'pending'),
-        orderBy('createdAt', 'desc'),
-        limit(50)
-      );
-    } else {
-      q = query(collection(db, 'payments'), orderBy('createdAt', 'desc'), limit(50));
-    }
-
-    const unsub = onSnapshot(q, (snap) => {
-      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setPayments(rows);
-    });
-    return () => unsub();
+    const loadPayments = async () => {
+      setLoading(true);
+      try {
+        const status = filter === "all" ? undefined : filter;
+        const res = await adminGetPaymentQueue(status);
+        if (res?.payments) {
+          setPayments(res.payments);
+        } else {
+          setPayments([]);
+        }
+      } catch (err) {
+        console.error("Error fetching payment queue:", err);
+        toast.error("Failed to load payments.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadPayments();
   }, [filter]);
 
   const filtered = payments.filter((p) => {
     if (!search) return true;
-    const hay = `${p.id} ${p.userId || ''} ${p.code || ''} ${p.type || ''} ${p.itemId || ''}`.toLowerCase();
+    const hay = `${p.id} ${p.userId || ""} ${p.userEmail || ""} ${
+      p.transferName || ""
+    } ${p.method || ""}`.toLowerCase();
     return hay.includes(search.toLowerCase());
   });
 
@@ -60,13 +57,17 @@ export default function PaymentsQueue() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search id / user / code"
+            placeholder="Search id / user / transfer name"
             className="border rounded px-2 py-1 text-sm w-56"
           />
         </div>
       </header>
 
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="text-sm text-gray-600 border rounded p-4 bg-white">
+          Loading payments…
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="text-sm text-gray-600 border rounded p-4 bg-white">
           No payments in this queue.
         </div>

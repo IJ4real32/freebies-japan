@@ -1,8 +1,8 @@
 // ✅ FILE: src/pages/AdminItems.jsx
-
 import React, { useEffect, useState } from 'react';
 import { collection, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { useNavigate } from 'react-router-dom';
 
 export default function AdminItems() {
   const [items, setItems] = useState([]);
@@ -11,6 +11,7 @@ export default function AdminItems() {
   const [search, setSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchItems = async () => {
@@ -43,7 +44,6 @@ export default function AdminItems() {
       (filter === 'hidden' && !item.visible);
 
     const matchesSearch = item.title.toLowerCase().includes(search.toLowerCase());
-
     return matchesFilter && matchesSearch;
   });
 
@@ -71,7 +71,15 @@ export default function AdminItems() {
 
   return (
     <div className="p-4 max-w-6xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Admin Item Management</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Admin Item Management</h1>
+        <button
+          onClick={() => navigate('/admin/item/new')}
+          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+        >
+          ➕ Sponsor Item
+        </button>
+      </div>
 
       <div className="flex flex-wrap items-center justify-between mb-4 gap-4">
         <div className="flex gap-2 items-center">
@@ -132,7 +140,7 @@ export default function AdminItems() {
               <td className="p-2 text-center">{item.visible ? 'Yes' : 'No'}</td>
               <td className="p-2 flex gap-2 justify-center">
                 <button
-                  onClick={() => alert(`Edit requested for: ${item.title}`)}
+                  onClick={() => navigate(`/admin/item/${item.id}`)}
                   className="text-blue-600 hover:underline"
                 >
                   Edit

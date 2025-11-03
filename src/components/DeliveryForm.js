@@ -1,82 +1,117 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { useAuth } from '../contexts/AuthContext';
+// ✅ FILE: src/components/DeliveryForm.jsx
+import React, { useState, useEffect } from "react";
+import axios from "axios";
+import { useAuth } from "../contexts/AuthContext";
 
-const DeliveryForm = ({ request, onSubmit, onCancel, existingData }) => {
+const DeliveryForm = ({ request = null, onSubmit, onCancel, existingData = {} }) => {
   const { currentUser } = useAuth();
-  
+
   const fallbackData = currentUser?.defaultAddress || {};
   const [formData, setFormData] = useState({
-    zipCode: existingData.zipCode || fallbackData.zipCode || '',
-    address: existingData.address || fallbackData.address || '',
-    roomNumber: existingData.roomNumber || fallbackData.roomNumber || '',
-    phone: existingData.phone || fallbackData.phone || ''
+    zipCode: existingData.zipCode || fallbackData.zipCode || "",
+    address: existingData.address || fallbackData.address || "",
+    roomNumber: existingData.roomNumber || fallbackData.roomNumber || "",
+    phone: existingData.phone || fallbackData.phone || "",
   });
 
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [suggestions, setSuggestions] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
 
+  // ✅ Auto-fetch address from zipcloud when ZIP is 7 digits
   useEffect(() => {
     if (formData.zipCode.length === 7 && /^\d+$/.test(formData.zipCode)) {
-      const fetchAddress = async () => {
+      const timer = setTimeout(async () => {
         try {
           setLoading(true);
-          const response = await axios.get(
+          setError("");
+          const res = await axios.get(
             `https://zipcloud.ibsnet.co.jp/api/search?zipcode=${formData.zipCode}`
           );
 
-          if (response.data.results) {
-            setSuggestions(response.data.results);
-            if (response.data.results.length === 1) {
-              const result = response.data.results[0];
-              setFormData(prev => ({
+          if (res.data?.results) {
+            setSuggestions(res.data.results);
+            if (res.data.results.length === 1) {
+              const r = res.data.results[0];
+              setFormData((prev) => ({
                 ...prev,
-                address: `${result.address1} ${result.address2} ${result.address3}`
+                address: `${r.address1} ${r.address2} ${r.address3}`,
               }));
             }
+          } else {
+            setError("No address found for this ZIP code.");
           }
         } catch (err) {
-          setError('ZIP code lookup failed');
+          console.error("ZIP lookup error:", err);
+          setError("ZIP code lookup failed. Please enter manually.");
         } finally {
           setLoading(false);
         }
-      };
-
-      const timer = setTimeout(fetchAddress, 500);
+      }, 600);
       return () => clearTimeout(timer);
     }
   }, [formData.zipCode]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e) => {
+  // ✅ Unified submit handler (supports both MyRequests + Payment modal)
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setError("");
 
     if (!formData.zipCode || !formData.address || !formData.phone) {
-      setError('ZIP Code, Address, and Phone are required');
+      setError("ZIP Code, Address, and Phone are required.");
       return;
     }
 
-    if (formData.zipCode.length !== 7) {
-      setError('ZIP code must be 7 digits');
+    if (formData.zipCode.length !== 7 || !/^\d{7}$/.test(formData.zipCode)) {
+      setError("ZIP code must be 7 digits.");
       return;
     }
 
     if (!/^\d{10,15}$/.test(formData.phone)) {
-      setError('Enter a valid phone number');
+      setError("Enter a valid phone number (10–15 digits, numbers only).");
       return;
     }
 
-    onSubmit(request.id, formData);
+    try {
+      setSubmitting(true);
+      const data = {
+        zipCode: formData.zipCode.trim(),
+        address: formData.address.trim(),
+        roomNumber: formData.roomNumber?.trim() || null,
+        phone: formData.phone.trim(),
+        submittedAt: new Date().toISOString(),
+      };
+
+      // ✅ Handle both use cases
+      if (typeof onSubmit === "function") {
+        if (request?.id) {
+          await onSubmit(request.id, data); // MyRequests page
+        } else {
+          await onSubmit(data); // Deposit modal
+        }
+      }
+    } catch (err) {
+      console.error("DeliveryForm submission failed:", err);
+      setError("Failed to save address. Try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mt-4 p-4 bg-gray-50 rounded-lg">
-      <h3 className="font-medium mb-3">Delivery Information</h3>
+    <form
+      onSubmit={handleSubmit}
+      className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200"
+    >
+      <h3 className="font-medium mb-3 text-gray-800 text-sm">
+        Delivery Information
+      </h3>
 
       {error && (
         <div className="bg-red-50 border-l-4 border-red-500 p-2 mb-3 rounded">
@@ -96,9 +131,13 @@ const DeliveryForm = ({ request, onSubmit, onCancel, existingData }) => {
             pattern="\d{7}"
             required
             className="w-full border rounded px-3 py-2 text-sm"
-            placeholder="1234567"
+            placeholder="e.g. 1234567"
           />
-          {loading && <p className="text-xs text-gray-500">Looking up address...</p>}
+          {loading && (
+            <p className="text-xs text-gray-500 mt-1">
+              Looking up address...
+            </p>
+          )}
         </div>
 
         <div>
@@ -124,6 +163,7 @@ const DeliveryForm = ({ request, onSubmit, onCancel, existingData }) => {
           onChange={handleChange}
           required
           className="w-full border rounded px-3 py-2 text-sm"
+          placeholder="Tokyo-to, Chiyoda-ku..."
         />
         {suggestions.length > 1 && (
           <div className="mt-1 text-xs">
@@ -134,9 +174,9 @@ const DeliveryForm = ({ request, onSubmit, onCancel, existingData }) => {
                   key={i}
                   className="p-2 hover:bg-gray-100 cursor-pointer"
                   onClick={() =>
-                    setFormData(prev => ({
+                    setFormData((prev) => ({
                       ...prev,
-                      address: `${item.address1} ${item.address2} ${item.address3}`
+                      address: `${item.address1} ${item.address2} ${item.address3}`,
                     }))
                   }
                 >
@@ -149,29 +189,35 @@ const DeliveryForm = ({ request, onSubmit, onCancel, existingData }) => {
       </div>
 
       <div className="mt-3">
-        <label className="block text-sm font-medium mb-1">Room/Building</label>
+        <label className="block text-sm font-medium mb-1">
+          Room / Building
+        </label>
         <input
           type="text"
           name="roomNumber"
           value={formData.roomNumber}
           onChange={handleChange}
           className="w-full border rounded px-3 py-2 text-sm"
+          placeholder="Room 201"
         />
       </div>
 
-      <div className="flex justify-end space-x-3 mt-4">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="px-4 py-2 border rounded text-sm"
-        >
-          Cancel
-        </button>
+      <div className="flex justify-end space-x-3 mt-5">
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 border rounded text-sm text-gray-700 hover:bg-gray-100"
+          >
+            Cancel
+          </button>
+        )}
         <button
           type="submit"
-          className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded text-sm"
+          disabled={submitting}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded text-sm disabled:opacity-50"
         >
-          Save Address
+          {submitting ? "Saving..." : "Save Address"}
         </button>
       </div>
     </form>

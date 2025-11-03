@@ -1,17 +1,20 @@
-// ✅ FILE: src/components/Admin/BackToDashboardButton.js
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import React from "react";
+import { useAuth } from "../../contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 
-const BackToDashboardButton = () => {
+export default function BackToDashboardButton() {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
+
+  // ✅ Hide this button for normal (non-admin) users
+  if (!isAdmin) return null;
+
   return (
     <button
-      onClick={() => navigate('/admin')}
-      className="mb-4 px-4 py-2 bg-gray-200 hover:bg-gray-300 text-sm rounded"
+      onClick={() => navigate("/admin")}
+      className="mb-4 text-sm bg-gray-800 hover:bg-gray-700 text-white px-3 py-1.5 rounded"
     >
       ← Back to Admin Dashboard
     </button>
   );
-};
-
-export default BackToDashboardButton;
+}
