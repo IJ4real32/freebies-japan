@@ -72,7 +72,6 @@ const AdminDashboard = () => {
       setStats((p) => ({ ...p, pendingDonations: snap.size }))
     );
 
-    // 🚚 Pickups/Deliveries
     const qDeliveries = query(
       collection(db, "pickups"),
       where("status", "==", "scheduled"),
@@ -125,7 +124,7 @@ const AdminDashboard = () => {
    * 🧭 Dashboard Layout
    * -------------------------------------------------------- */
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 relative">
       {/* 🔷 Compact Admin Top Bar */}
       <header className="fixed top-0 left-0 w-full z-40 bg-gradient-to-r from-indigo-900 via-blue-900 to-purple-900 text-white shadow-lg backdrop-blur-md">
         <div className="flex justify-between items-center px-4 py-3">
@@ -157,8 +156,17 @@ const AdminDashboard = () => {
       </header>
 
       {/* Main Content */}
-      <main className="pt-20 container mx-auto p-4">
-        <h1 className="text-3xl font-bold mb-8 text-gray-800">Admin Dashboard</h1>
+      <main className="pt-20 container mx-auto p-4 pb-24">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-800">Admin Dashboard</h1>
+          {/* Optional top button (hidden on small screens) */}
+          <button
+            onClick={() => navigate("/admin/create-donation")}
+            className="hidden sm:block bg-purple-600 hover:bg-purple-700 text-white font-semibold px-5 py-2 rounded-full focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all shadow-sm"
+          >
+            + Create Sponsored Item
+          </button>
+        </div>
 
         {/* Navigation Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-6">
@@ -225,6 +233,15 @@ const AdminDashboard = () => {
           </div>
         </section>
       </main>
+
+      {/* ✅ Floating Create Button (persistent bottom-right) */}
+      <button
+        onClick={() => navigate("/admin/create-donation")}
+        className="fixed bottom-6 right-6 z-50 bg-purple-600 hover:bg-purple-700 text-white rounded-full w-14 h-14 flex items-center justify-center text-3xl font-bold shadow-lg hover:shadow-2xl transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-purple-300 sm:hidden"
+        title="Create Sponsored Item"
+      >
+        +
+      </button>
     </div>
   );
 };

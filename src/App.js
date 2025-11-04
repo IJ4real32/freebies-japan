@@ -24,7 +24,7 @@ import Home from "./pages/Home";
 import Items from "./pages/Items";
 import Donate from "./pages/Donate";
 import DonateMoney from "./pages/DonateMoney";
-import MyActivity from "./pages/MyActivity"; // ✅ renamed
+import MyActivity from "./pages/MyActivity";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Profile from "./pages/Profile";
@@ -47,7 +47,7 @@ import AdminPaymentDetails from "./pages/AdminPaymentDetails";
 import AdminMoneyDonations from "./pages/AdminMoneyDonations";
 import AdminMoneyDonationsList from "./pages/AdminMoneyDonationsList";
 import AdminPickups from "./pages/AdminPickups";
-
+import AdminDonate from "./pages/AdminDonate"; // ✅ NEW: Admin Create Sponsored Item page
 
 /* ------------------------------------------------------------
  * Auth redirect + Navbar visibility controller
@@ -69,9 +69,7 @@ function AuthRedirectController({ setShowNavbar }) {
       const isAdminPage = location.pathname.startsWith("/admin");
 
       if (user) {
-        // ✅ Hide navbar completely on admin pages
         setShowNavbar(!isAdminPage);
-
         if (isPublicPage || location.pathname === "/") {
           navigate("/items", { replace: true });
         }
@@ -102,168 +100,174 @@ function App() {
       <LanguageProvider>
         <AuthProvider>
           <AuthRedirectController setShowNavbar={setShowNavbar} />
-
-          {/* ✅ Navbar visibility control */}
           {showNavbar && <Navbar />}
 
-{/* ✅ App Routes */}
-<Routes>
-  {/* Public + Onboarding */}
-  <Route path="/" element={<OnboardingSlides />} />
-  <Route path="/onboarding" element={<OnboardingSlides />} />
-  <Route path="/login" element={<Login />} />
-  <Route path="/signup" element={<Signup />} />
-  <Route path="/unauthorized" element={<Unauthorized />} />
-  <Route path="/admin-login" element={<AdminLogin />} />
-  <Route path="/health" element={<HealthCheck />} />
+          {/* ✅ App Routes */}
+          <Routes>
+            {/* Public + Onboarding */}
+            <Route path="/" element={<OnboardingSlides />} />
+            <Route path="/onboarding" element={<OnboardingSlides />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/unauthorized" element={<Unauthorized />} />
+            <Route path="/admin-login" element={<AdminLogin />} />
+            <Route path="/health" element={<HealthCheck />} />
 
-  {/* User Routes */}
-  <Route
-    path="/home"
-    element={
-      <PrivateRoute>
-        <Home />
-      </PrivateRoute>
-    }
-  />
-  <Route path="/items" element={<Items />} />
-  <Route
-    path="/donate"
-    element={
-      <PrivateRoute>
-        <Donate />
-      </PrivateRoute>
-    }
-  />
-  <Route
-    path="/subscribe"
-    element={
-      <PrivateRoute>
-        <DonateMoney />
-      </PrivateRoute>
-    }
-  />
-  <Route
-    path="/myactivity"
-    element={
-      <PrivateRoute>
-        <MyActivity />
-      </PrivateRoute>
-    }
-  />
-  <Route
-    path="/profile"
-    element={
-      <PrivateRoute>
-        <Profile />
-      </PrivateRoute>
-    }
-  />
-  <Route
-    path="/deposit-instructions"
-    element={
-      <PrivateRoute>
-        <DepositInstructions />
-      </PrivateRoute>
-    }
-  />
+            {/* User Routes */}
+            <Route
+              path="/home"
+              element={
+                <PrivateRoute>
+                  <Home />
+                </PrivateRoute>
+              }
+            />
+            <Route path="/items" element={<Items />} />
+            <Route
+              path="/donate"
+              element={
+                <PrivateRoute>
+                  <Donate />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/subscribe"
+              element={
+                <PrivateRoute>
+                  <DonateMoney />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/myactivity"
+              element={
+                <PrivateRoute>
+                  <MyActivity />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <PrivateRoute>
+                  <Profile />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/deposit-instructions"
+              element={
+                <PrivateRoute>
+                  <DepositInstructions />
+                </PrivateRoute>
+              }
+            />
 
-  {/* ------------------------------------------------------------
-   * Admin Protected Routes
-   * ------------------------------------------------------------ */}
-  <Route
-    path="/admin"
-    element={
-      <PrivateRouteAdmin>
-        <AdminDashboard />
-      </PrivateRouteAdmin>
-    }
-  />
-  <Route
-    path="/admin/requests"
-    element={
-      <PrivateRouteAdmin>
-        <RequestsAdmin />
-      </PrivateRouteAdmin>
-    }
-  />
-  <Route
-    path="/admin/items"
-    element={
-      <PrivateRouteAdmin>
-        <AdminManageItems />
-      </PrivateRouteAdmin>
-    }
-  />
-  <Route
-    path="/admin/item/:id"
-    element={
-      <PrivateRouteAdmin>
-        <AdminItemDetail />
-      </PrivateRouteAdmin>
-    }
-  />
-  <Route
-    path="/admin/users"
-    element={
-      <PrivateRouteAdmin>
-        <AdminUsers />
-      </PrivateRouteAdmin>
-    }
-  />
-  <Route
-    path="/admin/lottery"
-    element={
-      <PrivateRouteAdmin>
-        <AdminLotteryDashboard />
-      </PrivateRouteAdmin>
-    }
-  />
-  <Route
-    path="/admin/payments"
-    element={
-      <PrivateRouteAdmin>
-        <AdminPaymentsQueue />
-      </PrivateRouteAdmin>
-    }
-  />
-  <Route
-    path="/admin/payments/:id"
-    element={
-      <PrivateRouteAdmin>
-        <AdminPaymentDetails />
-      </PrivateRouteAdmin>
-    }
-  />
-  <Route
-    path="/admin/money-donations"
-    element={
-      <PrivateRouteAdmin>
-        <AdminMoneyDonationsList />
-      </PrivateRouteAdmin>
-    }
-  />
-  <Route
-    path="/admin/money-donations/:id"
-    element={
-      <PrivateRouteAdmin>
-        <AdminMoneyDonations />
-      </PrivateRouteAdmin>
-    }
-  />
+            {/* ------------------------------------------------------------
+             * Admin Protected Routes
+             * ------------------------------------------------------------ */}
+            <Route
+              path="/admin"
+              element={
+                <PrivateRouteAdmin>
+                  <AdminDashboard />
+                </PrivateRouteAdmin>
+              }
+            />
+            <Route
+              path="/admin/requests"
+              element={
+                <PrivateRouteAdmin>
+                  <RequestsAdmin />
+                </PrivateRouteAdmin>
+              }
+            />
+            <Route
+              path="/admin/items"
+              element={
+                <PrivateRouteAdmin>
+                  <AdminManageItems />
+                </PrivateRouteAdmin>
+              }
+            />
+            <Route
+              path="/admin/item/:id"
+              element={
+                <PrivateRouteAdmin>
+                  <AdminItemDetail />
+                </PrivateRouteAdmin>
+              }
+            />
+            <Route
+              path="/admin/users"
+              element={
+                <PrivateRouteAdmin>
+                  <AdminUsers />
+                </PrivateRouteAdmin>
+              }
+            />
+            <Route
+              path="/admin/lottery"
+              element={
+                <PrivateRouteAdmin>
+                  <AdminLotteryDashboard />
+                </PrivateRouteAdmin>
+              }
+            />
+            <Route
+              path="/admin/payments"
+              element={
+                <PrivateRouteAdmin>
+                  <AdminPaymentsQueue />
+                </PrivateRouteAdmin>
+              }
+            />
+            <Route
+              path="/admin/payments/:id"
+              element={
+                <PrivateRouteAdmin>
+                  <AdminPaymentDetails />
+                </PrivateRouteAdmin>
+              }
+            />
+            <Route
+              path="/admin/money-donations"
+              element={
+                <PrivateRouteAdmin>
+                  <AdminMoneyDonationsList />
+                </PrivateRouteAdmin>
+              }
+            />
+            <Route
+              path="/admin/money-donations/:id"
+              element={
+                <PrivateRouteAdmin>
+                  <AdminMoneyDonations />
+                </PrivateRouteAdmin>
+              }
+            />
 
-  {/* ✅ NEWLY FIXED — Deliveries Route must be INSIDE <Routes> */}
-  <Route
-    path="/admin/pickups"
-    element={
-      <PrivateRouteAdmin>
-        <AdminPickups />
-      </PrivateRouteAdmin>
-    }
-  />
-</Routes>
+            {/* ✅ NEW: Admin Create Sponsored Item Route */}
+            <Route
+              path="/admin/create-donation"
+              element={
+                <PrivateRouteAdmin>
+                  <AdminDonate />
+                </PrivateRouteAdmin>
+              }
+            />
 
-
+            {/* Deliveries Route */}
+            <Route
+              path="/admin/pickups"
+              element={
+                <PrivateRouteAdmin>
+                  <AdminPickups />
+                </PrivateRouteAdmin>
+              }
+            />
+          </Routes>
 
           {/* ✅ Global Toast Notifications */}
           <Toaster

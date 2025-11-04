@@ -137,6 +137,9 @@ export const adminRelistDonation = async ({ donationId, durationHours = 48 }) =>
   return res?.data || { ok: false };
 };
 
+/* =====================================================
+   ✅ Admin → Sponsored Donation
+   ===================================================== */
 export const adminCreateSponsoredDonation = async ({
   title,
   description = "",
@@ -146,7 +149,8 @@ export const adminCreateSponsoredDonation = async ({
   if (!title) throw new Error("title is required");
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "adminCreateSponsoredDonation");
-  const res = await callable({ title, description, images, durationHours });
+  // Explicitly include active status (matches backend expectation)
+  const res = await callable({ title, description, images, durationHours, status: "active" });
   return res?.data || { ok: false };
 };
 
@@ -167,7 +171,7 @@ export const createMoneyDonation = async ({
   return res?.data || { ok: false };
 };
 
-// ✅ Match deployed backend callable name
+// ✅ Admin Money Donation Fetch
 export const adminGetMoneyDonationsQueue = async (status = undefined, limit = 100) => {
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "getMoneyDonationsQueue_Admin");
@@ -175,7 +179,7 @@ export const adminGetMoneyDonationsQueue = async (status = undefined, limit = 10
   return res?.data || { ok: false };
 };
 
-// ✅ Match deployed backend callable name
+// ✅ Admin Money Donation Verify
 export const adminVerifyMoneyDonation = async ({ donationId, verify, note = "" }) => {
   if (!donationId) throw new Error("donationId is required");
   await ensureFreshIdToken();

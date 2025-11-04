@@ -1,4 +1,4 @@
-// ✅ FILE: src/pages/Items.js (Optimized UX + Request Safety)
+// ✅ FILE: src/pages/Items.js (Optimized UX + Request Safety + Self-Item Protection)
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -178,7 +178,7 @@ export default function Items() {
 
       try {
         // 🚫 Prevent requesting own item
-        if (item.ownerId === currentUser.uid) {
+        if (item.donorId === currentUser.uid) {
           toast.error("🚫 You cannot request your own donation.");
           setSubmitting(false);
           return;
@@ -209,7 +209,7 @@ export default function Items() {
         }
 
         if (!isSubscribed && trialOver) {
-          toast("🎁 You’ve used all 5 free requests. Donate ¥1,500 to continue!", {
+          toast("🎁 You've used all 5 free requests. Donate ¥1,500 to continue!", {
             icon: "🙏",
             style: { borderLeft: "4px solid #F59E0B" },
           });
@@ -244,6 +244,13 @@ export default function Items() {
     },
     [currentUser, navigate, isSubscribed, trialOver, submitting]
   );
+
+  /* =========================
+   * Check if current user is the item owner
+   * ========================= */
+  const isCurrentUserOwner = useCallback((item) => {
+    return currentUser && item.donorId === currentUser.uid;
+  }, [currentUser]);
 
   /* =========================
    * UI
@@ -297,6 +304,7 @@ export default function Items() {
                 ).getTime() <= Date.now();
               const isAwarded = item.status === "awarded";
               const isClosed = item.status === "closed";
+              const isOwner = isCurrentUserOwner(item);
 
               return (
                 <div
@@ -313,6 +321,13 @@ export default function Items() {
                       View More
                     </button>
                   </div>
+
+                  {/* Owner Badge */}
+                  {isOwner && (
+                    <div className="absolute top-2 left-2 z-20 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full font-semibold">
+                      Your Item
+                    </div>
+                  )}
 
                   {/* Image */}
                   <div className="h-44 sm:h-52 bg-gray-100 flex items-center justify-center overflow-hidden">
@@ -407,6 +422,13 @@ export default function Items() {
               <ArrowLeft size={22} />
             </button>
 
+            {/* Owner Badge in Drawer */}
+            {isCurrentUserOwner(viewItem) && (
+              <div className="absolute top-3 left-12 bg-yellow-500 text-white text-sm px-3 py-1 rounded-full font-semibold z-10">
+                Your Item
+              </div>
+            )}
+
             <div className="relative w-full h-56 bg-gray-100 rounded-lg overflow-hidden mb-3 flex items-center justify-center">
               {viewItem.images?.length ? (
                 <>
@@ -467,6 +489,11 @@ export default function Items() {
               >
                 {viewItem.type === "premium" ? "Premium" : "Free"}
               </span>
+              {isCurrentUserOwner(viewItem) && (
+                <span className="bg-yellow-500 text-white text-xs px-2 py-0.5 rounded">
+                  🏷️ Your Listing
+                </span>
+              )}
             </div>
 
             {viewItem.type === "premium" ? (
@@ -474,11 +501,20 @@ export default function Items() {
                 <p className="text-2xl font-semibold text-indigo-600 mb-3">
                   ¥{viewItem.price?.toLocaleString() || "—"}
                 </p>
-                <ItemDepositButton
-                  itemId={viewItem.id}
-                  title={viewItem.title}
-                  amountJPY={viewItem.price}
-                />
+                {isCurrentUserOwner(viewItem) ? (
+                  <button
+                    disabled
+                    className="w-full bg-gray-300 text-gray-500 px-6 py-2 rounded font-medium cursor-not-allowed"
+                  >
+                    Your Listing
+                  </button>
+                ) : (
+                  <ItemDepositButton
+                    itemId={viewItem.id}
+                    title={viewItem.title}
+                    amountJPY={viewItem.price}
+                  />
+                )}
               </>
             ) : (
               <button
@@ -486,13 +522,15 @@ export default function Items() {
                 disabled={
                   submitting ||
                   viewItem.status === "awarded" ||
-                  viewItem.status === "closed"
+                  viewItem.status === "closed" ||
+                  isCurrentUserOwner(viewItem)
                 }
                 className={`px-6 py-2 rounded font-medium w-full md:w-auto ${
                   submitting
                     ? "bg-gray-300 text-gray-600 cursor-wait"
                     : viewItem.status === "awarded" ||
-                      viewItem.status === "closed"
+                      viewItem.status === "closed" ||
+                      isCurrentUserOwner(viewItem)
                     ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                     : "bg-indigo-600 hover:bg-indigo-700 text-white"
                 }`}
@@ -503,6 +541,8 @@ export default function Items() {
                   ? "🎁 Awarded"
                   : viewItem.status === "closed"
                   ? "⏰ Closed"
+                  : isCurrentUserOwner(viewItem)
+                  ? "Your Item"
                   : "Request Now"}
               </button>
             )}
