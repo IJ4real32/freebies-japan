@@ -1,4 +1,4 @@
-// ✅ FILE: src/pages/Items.js (Optimized UX + Request Safety + Self-Item Protection)
+// ✅ FILE: src/pages/Items.js (Restored Subscription Banner + Clean Layout)
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -46,38 +46,17 @@ export default function Items() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState("");
-  const [bannerHeight, setBannerHeight] = useState(0);
 
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
 
   /* ------------------------------------------------------------------
-   * Sync trial data
+   * Sync trial data when AuthContext changes
    * ------------------------------------------------------------------ */
   useEffect(() => {
     setTrialLeft(trialCreditsLeft);
     setTrialOver(isTrialExpired);
   }, [trialCreditsLeft, isTrialExpired]);
-
-  /* ------------------------------------------------------------------
-   * Observe banner height dynamically
-   * ------------------------------------------------------------------ */
-  useEffect(() => {
-    const banner = document.querySelector(".subscription-banner");
-    if (!banner) return;
-
-    const updatePadding = () => setBannerHeight(banner.offsetHeight || 0);
-    const resizeObs = new ResizeObserver(updatePadding);
-    resizeObs.observe(banner);
-    const mutationObs = new MutationObserver(updatePadding);
-    mutationObs.observe(document.body, { childList: true, subtree: true });
-    updatePadding();
-
-    return () => {
-      resizeObs.disconnect();
-      mutationObs.disconnect();
-    };
-  }, []);
 
   /* =========================
    * Load Items
@@ -120,7 +99,7 @@ export default function Items() {
     fetchInitial();
   }, [fetchInitial]);
 
-  // Infinite scroll
+  // ✅ Infinite scroll to auto-load more
   useEffect(() => {
     const handleScroll = throttle(() => {
       const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
@@ -130,7 +109,7 @@ export default function Items() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, [loadMore]);
 
-  // Keyboard navigation
+  // Keyboard navigation for image slider
   useEffect(() => {
     const handleKey = (e) => {
       if (e.key === "Escape") setViewItem(null);
@@ -145,23 +124,6 @@ export default function Items() {
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [viewItem]);
-
-  // ✅ Clean search input (no special characters)
-  const handleSearchInput = (e) => {
-    const clean = e.target.value.replace(/[^a-zA-Z0-9\s]/g, "");
-    setSearch(clean);
-  };
-
-  // Filter items
-  const filteredItems = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter(
-      (i) =>
-        i.title?.toLowerCase().includes(q) ||
-        i.category?.toLowerCase().includes(q)
-    );
-  }, [items, search]);
 
   /* =========================
    * Handle Request
@@ -228,9 +190,7 @@ export default function Items() {
           if (res?.data?.ok) {
             toast.success(`Remaining credits: ${res.data.trialCreditsLeft}`);
           } else if (res?.data?.isTrialExpired) {
-            toast("🎁 Trial complete! Donate ¥1,500 to continue 💕", {
-              icon: "💝",
-            });
+            toast("🎁 Trial complete! Donate ¥1,500 to continue 💕", { icon: "💝" });
           }
         }
 
@@ -248,30 +208,28 @@ export default function Items() {
   /* =========================
    * Check if current user is the item owner
    * ========================= */
-  const isCurrentUserOwner = useCallback((item) => {
-    return currentUser && item.donorId === currentUser.uid;
-  }, [currentUser]);
+  const isCurrentUserOwner = useCallback(
+    (item) => currentUser && item.donorId === currentUser.uid,
+    [currentUser]
+  );
 
   /* =========================
    * UI
    * ========================= */
   return (
-    <div
-      className="min-h-screen bg-gray-50 relative w-full overflow-x-hidden transition-all duration-200 ease-in-out"
-      style={{ paddingTop: `${bannerHeight}px` }}
-    >
-      {/* ✅ Subscription Banner */}
-      <div className="subscription-banner fixed top-0 left-0 w-full z-40 transition-all duration-200">
+    <div className="min-h-screen bg-gray-50 relative w-full overflow-x-hidden transition-all duration-200 ease-in-out">
+      {/* ✅ Subscription Banner visible and self-managed */}
+      <div className="subscription-banner">
         <SubscriptionBanner />
       </div>
 
-      {/* 🔍 Search Bar */}
+      {/* 🔍 Search Bar (sticky below banner) */}
       <div className="bg-white/90 backdrop-blur border-b border-gray-100 py-3 px-4 flex justify-center sticky top-0 z-30 shadow-sm">
         <div className="relative w-full max-w-md sm:max-w-lg md:max-w-xl">
           <Search className="absolute left-3 top-2.5 text-gray-400 w-4 h-4" />
           <input
             value={search}
-            onChange={handleSearchInput}
+            onChange={(e) => setSearch(e.target.value.replace(/[^a-zA-Z0-9\s]/g, ""))}
             placeholder="Search items or categories"
             className="w-full pl-9 pr-3 py-2 rounded-full border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none text-sm sm:text-base bg-white placeholder-gray-400 font-normal tracking-wide"
           />
@@ -286,109 +244,116 @@ export default function Items() {
               <div key={i} className="bg-white h-56 sm:h-64 rounded-xl shadow-sm" />
             ))}
           </div>
-        ) : filteredItems.length === 0 ? (
+        ) : items.length === 0 ? (
           <p className="text-center text-gray-600 py-20 text-sm sm:text-base">
             No items available.
           </p>
         ) : (
           <div className="grid grid-cols-2 xs:grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-5">
-            {filteredItems.map((item) => {
-              const isPremium =
-                item.type === "premium" || item.accessType === "premium";
-              const expired =
-                item.requestWindowEnd &&
-                new Date(
-                  item.requestWindowEnd.toMillis
-                    ? item.requestWindowEnd.toMillis()
-                    : item.requestWindowEnd
-                ).getTime() <= Date.now();
-              const isAwarded = item.status === "awarded";
-              const isClosed = item.status === "closed";
-              const isOwner = isCurrentUserOwner(item);
+            {items
+              .filter((i) =>
+                search
+                  ? i.title?.toLowerCase().includes(search.toLowerCase()) ||
+                    i.category?.toLowerCase().includes(search.toLowerCase())
+                  : true
+              )
+              .map((item) => {
+                const isPremium =
+                  item.type === "premium" || item.accessType === "premium";
+                const expired =
+                  item.requestWindowEnd &&
+                  new Date(
+                    item.requestWindowEnd.toMillis
+                      ? item.requestWindowEnd.toMillis()
+                      : item.requestWindowEnd
+                  ).getTime() <= Date.now();
+                const isAwarded = item.status === "awarded";
+                const isClosed = item.status === "closed";
+                const isOwner = isCurrentUserOwner(item);
 
-              return (
-                <div
-                  key={item.id}
-                  className="relative bg-white rounded-2xl shadow hover:shadow-lg transition-all duration-200 cursor-pointer group overflow-hidden"
-                  onClick={() => {
-                    setViewItem(item);
-                    setImageIndex(0);
-                  }}
-                >
-                  {/* Overlay */}
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-10">
-                    <button className="bg-white/90 backdrop-blur text-gray-900 px-4 py-2 rounded-full text-sm font-semibold shadow hover:bg-white transition">
-                      View More
-                    </button>
-                  </div>
-
-                  {/* Owner Badge */}
-                  {isOwner && (
-                    <div className="absolute top-2 left-2 z-20 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full font-semibold">
-                      Your Item
+                return (
+                  <div
+                    key={item.id}
+                    className="relative bg-white rounded-2xl shadow hover:shadow-lg transition-all duration-200 cursor-pointer group overflow-hidden"
+                    onClick={() => {
+                      setViewItem(item);
+                      setImageIndex(0);
+                    }}
+                  >
+                    {/* Overlay */}
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-10">
+                      <button className="bg-white/90 backdrop-blur text-gray-900 px-4 py-2 rounded-full text-sm font-semibold shadow hover:bg-white transition">
+                        View More
+                      </button>
                     </div>
-                  )}
 
-                  {/* Image */}
-                  <div className="h-44 sm:h-52 bg-gray-100 flex items-center justify-center overflow-hidden">
-                    {item.images?.[0] ? (
-                      <img
-                        src={item.images[0]}
-                        alt={item.title}
-                        className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
-                      />
-                    ) : (
-                      <span className="text-gray-400 text-xs">No Image</span>
-                    )}
-                  </div>
-
-                  {/* Info */}
-                  <div className="p-3 sm:p-4">
-                    <h2 className="text-sm sm:text-base font-semibold line-clamp-2 h-10 sm:h-12 text-gray-800">
-                      {item.title}
-                    </h2>
-                    <p className="text-xs sm:text-sm text-gray-500 mb-1">
-                      {item.category || ""}
-                    </p>
-
-                    {item.type === "free" && (
-                      <p
-                        className={`text-xs sm:text-sm font-medium ${
-                          isAwarded
-                            ? "text-pink-600"
-                            : isClosed || expired
-                            ? "text-gray-400"
-                            : "text-emerald-600"
-                        }`}
-                      >
-                        {isAwarded
-                          ? "🎁 Awarded"
-                          : isClosed || expired
-                          ? "⏰ Request Closed"
-                          : `⏱️ ${formatTimeRemaining(item.requestWindowEnd)}`}
-                      </p>
+                    {/* Owner Badge */}
+                    {isOwner && (
+                      <div className="absolute top-2 left-2 z-20 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full font-semibold">
+                        Your Item
+                      </div>
                     )}
 
-                    <div className="flex items-center justify-between mt-1">
-                      {isPremium ? (
-                        <span className="text-indigo-600 font-bold text-sm sm:text-base">
-                          ¥{item.price || item.priceJPY || "—"}
-                        </span>
+                    {/* Image */}
+                    <div className="h-44 sm:h-52 bg-gray-100 flex items-center justify-center overflow-hidden">
+                      {item.images?.[0] ? (
+                        <img
+                          src={item.images[0]}
+                          alt={item.title}
+                          className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
+                        />
                       ) : (
-                        <span className="text-emerald-600 font-semibold text-sm sm:text-base">
-                          FREE
-                        </span>
-                      )}
-                      {item.verified && (
-                        <span className="text-[10px] sm:text-xs bg-green-600 text-white px-1.5 py-0.5 rounded">
-                          Verified
-                        </span>
+                        <span className="text-gray-400 text-xs">No Image</span>
                       )}
                     </div>
+
+                    {/* Info */}
+                    <div className="p-3 sm:p-4">
+                      <h2 className="text-sm sm:text-base font-semibold line-clamp-2 h-10 sm:h-12 text-gray-800">
+                        {item.title}
+                      </h2>
+                      <p className="text-xs sm:text-sm text-gray-500 mb-1">
+                        {item.category || ""}
+                      </p>
+
+                      {item.type === "free" && (
+                        <p
+                          className={`text-xs sm:text-sm font-medium ${
+                            isAwarded
+                              ? "text-pink-600"
+                              : isClosed || expired
+                              ? "text-gray-400"
+                              : "text-emerald-600"
+                          }`}
+                        >
+                          {isAwarded
+                            ? "🎁 Awarded"
+                            : isClosed || expired
+                            ? "⏰ Request Closed"
+                            : `⏱️ ${formatTimeRemaining(item.requestWindowEnd)}`}
+                        </p>
+                      )}
+
+                      <div className="flex items-center justify-between mt-1">
+                        {isPremium ? (
+                          <span className="text-indigo-600 font-bold text-sm sm:text-base">
+                            ¥{item.price || item.priceJPY || "—"}
+                          </span>
+                        ) : (
+                          <span className="text-emerald-600 font-semibold text-sm sm:text-base">
+                            FREE
+                          </span>
+                        )}
+                        {item.verified && (
+                          <span className="text-[10px] sm:text-xs bg-green-600 text-white px-1.5 py-0.5 rounded">
+                            Verified
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
         )}
 
@@ -399,7 +364,7 @@ export default function Items() {
         )}
       </main>
 
-      {/* Drawer */}
+      {/* Drawer (Item Detail) */}
       {viewItem && (
         <div
           className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex justify-center items-end md:items-center"
@@ -422,7 +387,6 @@ export default function Items() {
               <ArrowLeft size={22} />
             </button>
 
-            {/* Owner Badge in Drawer */}
             {isCurrentUserOwner(viewItem) && (
               <div className="absolute top-3 left-12 bg-yellow-500 text-white text-sm px-3 py-1 rounded-full font-semibold z-10">
                 Your Item
@@ -443,8 +407,7 @@ export default function Items() {
                         onClick={() =>
                           setImageIndex(
                             (i) =>
-                              (i - 1 + viewItem.images.length) %
-                              viewItem.images.length
+                              (i - 1 + viewItem.images.length) % viewItem.images.length
                           )
                         }
                         className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/40 text-white rounded-full p-1"

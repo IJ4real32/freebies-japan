@@ -1,3 +1,4 @@
+// ✅ FILE: src/pages/Donate.js
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import {
   addDoc,
@@ -26,12 +27,6 @@ const CATEGORIES = [
   { value: "other", label: "Other" },
 ];
 
-const WINDOW_OPTIONS_HOURS = [
-  { value: 24, label: "24h" },
-  { value: 48, label: "48h" },
-  { value: 72, label: "72h" },
-];
-
 const PREFECTURES = [
   "Hokkaido","Aomori","Iwate","Miyagi","Akita","Yamagata","Fukushima",
   "Ibaraki","Tochigi","Gunma","Saitama","Chiba","Tokyo","Kanagawa",
@@ -49,7 +44,6 @@ export default function Donate() {
   const navigate = useNavigate();
   const addressRef = useRef(null);
 
-  const [userAddress, setUserAddress] = useState(null);
   const [loadingZipcode, setLoadingZipcode] = useState(false);
   const [addressOpen, setAddressOpen] = useState(false);
 
@@ -82,7 +76,6 @@ export default function Donate() {
         const snap = await getDoc(doc(db, "users", currentUser.uid));
         if (snap.exists() && snap.data().defaultAddress) {
           const a = snap.data().defaultAddress;
-          setUserAddress(a);
           setForm((f) => ({
             ...f,
             addressLine1: a.addressLine1 || "",
@@ -105,7 +98,9 @@ export default function Donate() {
     if (clean.length !== 7) return;
     setLoadingZipcode(true);
     try {
-      const res = await fetch(`https://zipcloud.ibsnet.co.jp/api/search?zipcode=${clean}`);
+      const res = await fetch(
+        `https://zipcloud.ibsnet.co.jp/api/search?zipcode=${clean}`
+      );
       const data = await res.json();
       if (data.status === 200 && data.results?.length) {
         const r = data.results[0];
@@ -123,9 +118,10 @@ export default function Donate() {
     }
   };
 
-  /* -------------------- Handlers -------------------- */
+  /* -------------------- Input Handlers -------------------- */
   const sanitizeText = (v = "") =>
-    v.replace(/[^a-zA-Z0-9\s.,!()&'":;/-]/g, "")
+    v
+      .replace(/[^a-zA-Z0-9\s.,!()&'":;/-]/g, "")
       .replace(/\s{2,}/g, " ")
       .replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -138,7 +134,10 @@ export default function Donate() {
     let newVal = value;
     if (name === "price") newVal = value.replace(/[^\d]/g, "");
     else if (name === "postalCode") {
-      newVal = value.replace(/[^\d]/g, "").replace(/(\d{3})(\d{4})/, "$1-$2").slice(0, 8);
+      newVal = value
+        .replace(/[^\d]/g, "")
+        .replace(/(\d{3})(\d{4})/, "$1-$2")
+        .slice(0, 8);
       if (newVal.length === 8) fetchAddressFromZipcode(newVal);
     } else newVal = sanitizeText(value);
     setForm((f) => ({ ...f, [name]: newVal }));
@@ -146,7 +145,9 @@ export default function Donate() {
 
   const onFiles = (e) => {
     const files = Array.from(e.target.files || []);
-    const valid = files.filter((f) => f.type.startsWith("image/") && f.size <= 5 * 1024 * 1024);
+    const valid = files.filter(
+      (f) => f.type.startsWith("image/") && f.size <= 5 * 1024 * 1024
+    );
     setImages([...images, ...valid].slice(0, 4));
   };
 
@@ -164,8 +165,16 @@ export default function Donate() {
 
   /* -------------------- Validation -------------------- */
   const canSubmit = useMemo(() => {
-    if (!form.title.trim() || !form.description.trim() || !form.category) return false;
-    if (!form.addressLine1.trim() || !form.city.trim() || !form.postalCode.trim() || !form.prefecture.trim()) return false;
+    if (
+      !form.title.trim() ||
+      !form.description.trim() ||
+      !form.category ||
+      !form.addressLine1.trim() ||
+      !form.city.trim() ||
+      !form.postalCode.trim() ||
+      !form.prefecture.trim()
+    )
+      return false;
     if (images.length < 2 || images.length > 4) return false;
     if (isPremium) {
       const n = Number(form.price);
@@ -178,7 +187,9 @@ export default function Donate() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting || !currentUser) return;
-    if (!canSubmit) return setErrorMsg("Please complete all required fields.");
+    if (!canSubmit)
+      return setErrorMsg("Please complete all required fields.");
+
     setSubmitting(true);
     try {
       const id = uuidv4();
@@ -200,7 +211,9 @@ export default function Donate() {
           postalCode: form.postalCode.trim(),
           prefecture: form.prefecture.trim(),
           country: "Japan",
-          fullAddress: `${form.addressLine1}${form.addressLine2 ? ", " + form.addressLine2 : ""}, ${form.city}, ${form.prefecture} ${form.postalCode}, Japan`,
+          fullAddress: `${form.addressLine1}${
+            form.addressLine2 ? ", " + form.addressLine2 : ""
+          }, ${form.city}, ${form.prefecture} ${form.postalCode}, Japan`,
         },
         type: form.type,
         price: isPremium ? Number(form.price) : null,
@@ -212,26 +225,44 @@ export default function Donate() {
         ...(form.type === "free"
           ? {
               requestWindowEnd: Timestamp.fromDate(
-                new Date(Date.now() + Number(form.windowHours) * 60 * 60 * 1000)
+                new Date(
+                  Date.now() + Number(form.windowHours) * 60 * 60 * 1000
+                )
               ),
             }
           : {}),
       };
+
       await addDoc(collection(db, "donations"), donation);
+
       toast.success("🎉 Donation submitted successfully!");
-      setTimeout(() => navigate("/my-activity"), 1000);
+      setSuccessMsg("✅ Donation submitted! Redirecting to My Activity...");
+
+      // ✅ Redirect fix (use correct route and safety fallback)
+      setTimeout(() => {
+        try {
+          navigate("/myactivity");
+        } catch (err) {
+          console.warn("Navigation fallback:", err);
+          window.location.href = "/myactivity";
+        }
+      }, 900);
     } catch (err) {
       console.error(err);
       setErrorMsg(err.message || "Donation failed");
+      toast.error("❌ Failed to submit donation.");
     } finally {
       setSubmitting(false);
     }
   };
 
-  /* -------------------- Auto-scroll when opening -------------------- */
+  /* -------------------- Auto-scroll for Address -------------------- */
   useEffect(() => {
     if (addressOpen && addressRef.current && window.innerWidth < 640)
-      addressRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+      addressRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
   }, [addressOpen]);
 
   /* -------------------- UI -------------------- */
@@ -242,10 +273,21 @@ export default function Donate() {
           {t("donate") || "Donate an Item"}
         </h1>
 
-        {errorMsg && <div className="bg-red-50 border border-red-300 text-red-800 rounded-xl p-4 mb-6">{errorMsg}</div>}
-        {successMsg && <div className="bg-green-50 border border-green-300 text-green-800 rounded-xl p-4 mb-6">{successMsg}</div>}
+        {errorMsg && (
+          <div className="bg-red-50 border border-red-300 text-red-800 rounded-xl p-4 mb-6">
+            {errorMsg}
+          </div>
+        )}
+        {successMsg && (
+          <div className="bg-green-50 border border-green-300 text-green-800 rounded-xl p-4 mb-6">
+            {successMsg}
+          </div>
+        )}
 
-        <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6 text-gray-700">
+        <form
+          onSubmit={handleSubmit}
+          className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6 text-gray-700"
+        >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* LEFT COLUMN */}
             <div className="space-y-4">
@@ -261,7 +303,9 @@ export default function Donate() {
                   placeholder="e.g., Wooden Table Or Baby Stroller"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
                 />
-                <div className="text-xs text-gray-500 mt-1 text-right">{form.title.length}/100</div>
+                <div className="text-xs text-gray-500 mt-1 text-right">
+                  {form.title.length}/100
+                </div>
               </div>
 
               {/* Description */}
@@ -277,12 +321,16 @@ export default function Donate() {
                   placeholder="Describe condition, size, and any defects..."
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
                 />
-                <div className="text-xs text-gray-500 mt-1 text-right">{form.description.length}/1000</div>
+                <div className="text-xs text-gray-500 mt-1 text-right">
+                  {form.description.length}/1000
+                </div>
               </div>
 
               {/* Images */}
               <div>
-                <label className="block font-medium mb-1">Images (2–4) *</label>
+                <label className="block font-medium mb-1">
+                  Images (2–4) *
+                </label>
                 <input
                   type="file"
                   accept="image/*"
@@ -293,10 +341,16 @@ export default function Donate() {
                 <div className="flex flex-wrap gap-3 mt-3">
                   {images.map((img, idx) => (
                     <div key={idx} className="relative group">
-                      <img src={URL.createObjectURL(img)} alt="" className="w-24 h-24 object-cover rounded-lg border" />
+                      <img
+                        src={URL.createObjectURL(img)}
+                        alt=""
+                        className="w-24 h-24 object-cover rounded-lg border"
+                      />
                       <button
                         type="button"
-                        onClick={() => setImages(images.filter((_, i) => i !== idx))}
+                        onClick={() =>
+                          setImages(images.filter((_, i) => i !== idx))
+                        }
                         className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition"
                       >
                         ×
@@ -337,20 +391,27 @@ export default function Donate() {
                   <span>📍 Pickup Address *</span>
                   <ChevronDown
                     size={18}
-                    className={`transform transition-transform duration-300 ${addressOpen ? "rotate-180" : ""}`}
+                    className={`transform transition-transform duration-300 ${
+                      addressOpen ? "rotate-180" : ""
+                    }`}
                   />
                 </button>
 
                 <div
                   className={`transition-all duration-300 overflow-hidden ${
-                    addressOpen ? "max-h-[900px] mt-3 opacity-100" : "max-h-0 opacity-0"
+                    addressOpen
+                      ? "max-h-[900px] mt-3 opacity-100"
+                      : "max-h-0 opacity-0"
                   } md:max-h-none md:opacity-100 md:mt-3`}
                 >
-                  {/* Postal Code */}
                   <div className="mb-3">
                     <label className="block text-sm font-medium mb-1">
                       Postal Code *
-                      {loadingZipcode && <span className="ml-2 text-xs text-indigo-600">Loading...</span>}
+                      {loadingZipcode && (
+                        <span className="ml-2 text-xs text-indigo-600">
+                          Loading...
+                        </span>
+                      )}
                     </label>
                     <input
                       name="postalCode"
@@ -365,7 +426,9 @@ export default function Donate() {
 
                   {/* Prefecture */}
                   <div className="mb-3">
-                    <label className="block text-sm font-medium mb-1">Prefecture *</label>
+                    <label className="block text-sm font-medium mb-1">
+                      Prefecture *
+                    </label>
                     <select
                       name="prefecture"
                       value={form.prefecture}
@@ -441,7 +504,9 @@ export default function Donate() {
               {/* Price */}
               {isPremium && (
                 <div>
-                  <label className="block font-medium mb-1">Price (JPY) *</label>
+                  <label className="block font-medium mb-1">
+                    Price (JPY) *
+                  </label>
                   <input
                     name="price"
                     type="number"
