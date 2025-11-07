@@ -23,7 +23,6 @@ import OnboardingSlides from "./pages/OnboardingSlides";
 import Home from "./pages/Home";
 import Items from "./pages/Items";
 import Donate from "./pages/Donate";
-import DonateMoney from "./pages/DonateMoney";
 import MyActivity from "./pages/MyActivity";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -47,7 +46,7 @@ import AdminPaymentDetails from "./pages/AdminPaymentDetails";
 import AdminMoneyDonations from "./pages/AdminMoneyDonations";
 import AdminMoneyDonationsList from "./pages/AdminMoneyDonationsList";
 import AdminPickups from "./pages/AdminPickups";
-import AdminDonate from "./pages/AdminDonate"; // ✅ NEW: Admin Create Sponsored Item page
+import AdminDonate from "./pages/AdminDonate";
 
 /* ------------------------------------------------------------
  * Auth redirect + Navbar visibility controller
@@ -131,14 +130,17 @@ function App() {
                 </PrivateRoute>
               }
             />
-            <Route
+
+            {/* ⚠️ Removed /subscribe page route (replaced with modal) */}
+            {/* <Route
               path="/subscribe"
               element={
                 <PrivateRoute>
                   <DonateMoney />
                 </PrivateRoute>
               }
-            />
+            /> */}
+
             <Route
               path="/myactivity"
               element={
@@ -248,7 +250,7 @@ function App() {
               }
             />
 
-            {/* ✅ NEW: Admin Create Sponsored Item Route */}
+            {/* ✅ Admin Create Sponsored Item Route */}
             <Route
               path="/admin/create-donation"
               element={

@@ -1,5 +1,5 @@
-// ✅ FILE: src/pages/Items.js (Restored Subscription Banner + Clean Layout)
-import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+// ✅ FILE: src/pages/Items.js (With Auto Subscription Modal)
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection,
@@ -14,6 +14,7 @@ import { db, functions } from "../firebase";
 import { httpsCallable } from "firebase/functions";
 import { useAuth } from "../contexts/AuthContext";
 import SubscriptionBanner from "../components/UI/SubscriptionBanner";
+import SubscriptionModal from "../components/Payments/SubscriptionModal"; // ✅ NEW
 import ItemDepositButton from "../components/Payments/ItemDepositButton";
 import { X, ArrowLeft, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import toast from "react-hot-toast";
@@ -36,8 +37,6 @@ export default function Items() {
   const navigate = useNavigate();
   const { currentUser, isSubscribed, trialCreditsLeft, isTrialExpired } = useAuth();
 
-  const [trialLeft, setTrialLeft] = useState(trialCreditsLeft || 0);
-  const [trialOver, setTrialOver] = useState(isTrialExpired || false);
   const [items, setItems] = useState([]);
   const [viewItem, setViewItem] = useState(null);
   const [imageIndex, setImageIndex] = useState(0);
@@ -46,13 +45,14 @@ export default function Items() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState("");
+  const [trialLeft, setTrialLeft] = useState(trialCreditsLeft || 0);
+  const [trialOver, setTrialOver] = useState(isTrialExpired || false);
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false); // ✅ NEW
 
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
 
-  /* ------------------------------------------------------------------
-   * Sync trial data when AuthContext changes
-   * ------------------------------------------------------------------ */
+  /* Sync trial data when AuthContext changes */
   useEffect(() => {
     setTrialLeft(trialCreditsLeft);
     setTrialOver(isTrialExpired);
@@ -99,7 +99,7 @@ export default function Items() {
     fetchInitial();
   }, [fetchInitial]);
 
-  // ✅ Infinite scroll to auto-load more
+  // ✅ Infinite scroll
   useEffect(() => {
     const handleScroll = throttle(() => {
       const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
@@ -109,7 +109,7 @@ export default function Items() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, [loadMore]);
 
-  // Keyboard navigation for image slider
+  // Keyboard navigation for drawer images
   useEffect(() => {
     const handleKey = (e) => {
       if (e.key === "Escape") setViewItem(null);
@@ -164,18 +164,18 @@ export default function Items() {
         }
 
         if (item.type !== "free") return;
-        if (item.status === "awarded" || item.status === "closed") {
+        if (["awarded", "closed"].includes(item.status)) {
           toast("🎁 This item is no longer available.");
           setSubmitting(false);
           return;
         }
 
-        if (!isSubscribed && trialOver) {
-          toast("🎁 You've used all 5 free requests. Donate ¥1,500 to continue!", {
+        // ✅ Trigger Subscription Modal when trial is over
+        if (!isSubscribed && (trialOver || trialLeft <= 0)) {
+          toast("🎁 You’ve used all free requests. Please deposit ¥1,500 to continue!", {
             icon: "🙏",
-            style: { borderLeft: "4px solid #F59E0B" },
           });
-          navigate("/subscribe");
+          setShowSubscriptionModal(true);
           setSubmitting(false);
           return;
         }
@@ -190,7 +190,7 @@ export default function Items() {
           if (res?.data?.ok) {
             toast.success(`Remaining credits: ${res.data.trialCreditsLeft}`);
           } else if (res?.data?.isTrialExpired) {
-            toast("🎁 Trial complete! Donate ¥1,500 to continue 💕", { icon: "💝" });
+            setShowSubscriptionModal(true);
           }
         }
 
@@ -202,12 +202,9 @@ export default function Items() {
         setSubmitting(false);
       }
     },
-    [currentUser, navigate, isSubscribed, trialOver, submitting]
+    [currentUser, navigate, isSubscribed, trialOver, submitting, trialLeft]
   );
 
-  /* =========================
-   * Check if current user is the item owner
-   * ========================= */
   const isCurrentUserOwner = useCallback(
     (item) => currentUser && item.donorId === currentUser.uid,
     [currentUser]
@@ -218,18 +215,17 @@ export default function Items() {
    * ========================= */
   return (
     <div className="min-h-screen bg-gray-50 relative w-full overflow-x-hidden transition-all duration-200 ease-in-out">
-      {/* ✅ Subscription Banner visible and self-managed */}
-      <div className="subscription-banner">
-        <SubscriptionBanner />
-      </div>
+      <SubscriptionBanner />
 
-      {/* 🔍 Search Bar (sticky below banner) */}
+      {/* 🔍 Search Bar */}
       <div className="bg-white/90 backdrop-blur border-b border-gray-100 py-3 px-4 flex justify-center sticky top-0 z-30 shadow-sm">
         <div className="relative w-full max-w-md sm:max-w-lg md:max-w-xl">
           <Search className="absolute left-3 top-2.5 text-gray-400 w-4 h-4" />
           <input
             value={search}
-            onChange={(e) => setSearch(e.target.value.replace(/[^a-zA-Z0-9\s]/g, ""))}
+            onChange={(e) =>
+              setSearch(e.target.value.replace(/[^a-zA-Z0-9\s]/g, ""))
+            }
             placeholder="Search items or categories"
             className="w-full pl-9 pr-3 py-2 rounded-full border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none text-sm sm:text-base bg-white placeholder-gray-400 font-normal tracking-wide"
           />
@@ -280,21 +276,18 @@ export default function Items() {
                       setImageIndex(0);
                     }}
                   >
-                    {/* Overlay */}
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-10">
                       <button className="bg-white/90 backdrop-blur text-gray-900 px-4 py-2 rounded-full text-sm font-semibold shadow hover:bg-white transition">
                         View More
                       </button>
                     </div>
 
-                    {/* Owner Badge */}
                     {isOwner && (
                       <div className="absolute top-2 left-2 z-20 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full font-semibold">
                         Your Item
                       </div>
                     )}
 
-                    {/* Image */}
                     <div className="h-44 sm:h-52 bg-gray-100 flex items-center justify-center overflow-hidden">
                       {item.images?.[0] ? (
                         <img
@@ -307,7 +300,6 @@ export default function Items() {
                       )}
                     </div>
 
-                    {/* Info */}
                     <div className="p-3 sm:p-4">
                       <h2 className="text-sm sm:text-base font-semibold line-clamp-2 h-10 sm:h-12 text-gray-800">
                         {item.title}
@@ -407,7 +399,8 @@ export default function Items() {
                         onClick={() =>
                           setImageIndex(
                             (i) =>
-                              (i - 1 + viewItem.images.length) % viewItem.images.length
+                              (i - 1 + viewItem.images.length) %
+                              viewItem.images.length
                           )
                         }
                         className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/40 text-white rounded-full p-1"
@@ -416,9 +409,7 @@ export default function Items() {
                       </button>
                       <button
                         onClick={() =>
-                          setImageIndex(
-                            (i) => (i + 1) % viewItem.images.length
-                          )
+                          setImageIndex((i) => (i + 1) % viewItem.images.length)
                         }
                         className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/40 text-white rounded-full p-1"
                       >
@@ -512,6 +503,12 @@ export default function Items() {
           </div>
         </div>
       )}
+
+      {/* ✅ Subscription Modal */}
+      <SubscriptionModal
+        open={showSubscriptionModal}
+        onClose={() => setShowSubscriptionModal(false)}
+      />
     </div>
   );
 }
