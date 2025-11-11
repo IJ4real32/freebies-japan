@@ -1,4 +1,4 @@
-// ✅ FILE: src/pages/Items.js (With Auto Subscription Modal)
+// ✅ FILE: src/pages/Items.js (With Size + Delivery Estimate + Auto Subscription Modal)
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -14,7 +14,7 @@ import { db, functions } from "../firebase";
 import { httpsCallable } from "firebase/functions";
 import { useAuth } from "../contexts/AuthContext";
 import SubscriptionBanner from "../components/UI/SubscriptionBanner";
-import SubscriptionModal from "../components/Payments/SubscriptionModal"; // ✅ NEW
+import SubscriptionModal from "../components/Payments/SubscriptionModal";
 import ItemDepositButton from "../components/Payments/ItemDepositButton";
 import { X, ArrowLeft, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import toast from "react-hot-toast";
@@ -35,7 +35,8 @@ function formatTimeRemaining(endAt) {
 
 export default function Items() {
   const navigate = useNavigate();
-  const { currentUser, isSubscribed, trialCreditsLeft, isTrialExpired } = useAuth();
+  const { currentUser, isSubscribed, trialCreditsLeft, isTrialExpired } =
+    useAuth();
 
   const [items, setItems] = useState([]);
   const [viewItem, setViewItem] = useState(null);
@@ -47,7 +48,7 @@ export default function Items() {
   const [search, setSearch] = useState("");
   const [trialLeft, setTrialLeft] = useState(trialCreditsLeft || 0);
   const [trialOver, setTrialOver] = useState(isTrialExpired || false);
-  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false); // ✅ NEW
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
 
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
@@ -139,14 +140,12 @@ export default function Items() {
       setSubmitting(true);
 
       try {
-        // 🚫 Prevent requesting own item
         if (item.donorId === currentUser.uid) {
           toast.error("🚫 You cannot request your own donation.");
           setSubmitting(false);
           return;
         }
 
-        // 🚫 Prevent duplicate requests
         const rqSnap = await getDocs(
           query(
             collection(db, "requests"),
@@ -170,11 +169,12 @@ export default function Items() {
           return;
         }
 
-        // ✅ Trigger Subscription Modal when trial is over
+        // ✅ Trial enforcement
         if (!isSubscribed && (trialOver || trialLeft <= 0)) {
-          toast("🎁 You’ve used all free requests. Please deposit ¥1,500 to continue!", {
-            icon: "🙏",
-          });
+          toast(
+            "🎁 You’ve used all free requests. Please deposit ¥1,500 to continue!",
+            { icon: "🙏" }
+          );
           setShowSubscriptionModal(true);
           setSubmitting(false);
           return;
@@ -308,6 +308,7 @@ export default function Items() {
                         {item.category || ""}
                       </p>
 
+                      {/* ⏱️ Time or Status */}
                       {item.type === "free" && (
                         <p
                           className={`text-xs sm:text-sm font-medium ${
@@ -326,20 +327,38 @@ export default function Items() {
                         </p>
                       )}
 
-                      <div className="flex items-center justify-between mt-1">
-                        {isPremium ? (
-                          <span className="text-indigo-600 font-bold text-sm sm:text-base">
-                            ¥{item.price || item.priceJPY || "—"}
-                          </span>
-                        ) : (
-                          <span className="text-emerald-600 font-semibold text-sm sm:text-base">
-                            FREE
-                          </span>
-                        )}
-                        {item.verified && (
-                          <span className="text-[10px] sm:text-xs bg-green-600 text-white px-1.5 py-0.5 rounded">
-                            Verified
-                          </span>
+                      {/* 💰 Price + Size + Delivery Estimate */}
+                      <div className="flex flex-col gap-0.5 mt-1">
+                        <div className="flex items-center justify-between">
+                          {isPremium ? (
+                            <span className="text-indigo-600 font-bold text-sm sm:text-base">
+                              ¥{item.price || item.priceJPY || "—"}
+                            </span>
+                          ) : (
+                            <span className="text-emerald-600 font-semibold text-sm sm:text-base">
+                              FREE
+                            </span>
+                          )}
+                          {item.verified && (
+                            <span className="text-[10px] sm:text-xs bg-green-600 text-white px-1.5 py-0.5 rounded">
+                              Verified
+                            </span>
+                          )}
+                        </div>
+
+                        {(item.size || item.estimatedDelivery) && (
+                          <div className="flex justify-between text-[11px] text-gray-500 mt-0.5">
+                            {item.size && (
+                              <span className="capitalize">📦 {item.size}</span>
+                            )}
+                            {item.estimatedDelivery?.min &&
+                              item.estimatedDelivery?.max && (
+                                <span className="text-gray-400">
+                                  ¥{item.estimatedDelivery.min.toLocaleString()}–
+                                  ¥{item.estimatedDelivery.max.toLocaleString()}
+                                </span>
+                              )}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -427,6 +446,23 @@ export default function Items() {
             <p className="text-sm text-gray-600 mb-3">
               {viewItem.description || "No description"}
             </p>
+
+            {/* 🚚 Delivery Estimate */}
+            {viewItem.estimatedDelivery && (
+              <div className="bg-indigo-50 text-indigo-700 text-sm px-3 py-2 rounded-lg mb-3 flex items-center justify-between">
+                <span className="font-medium">Estimated Delivery Range:</span>
+                <span className="font-semibold">
+                  ¥{viewItem.estimatedDelivery.min?.toLocaleString()}–¥
+                  {viewItem.estimatedDelivery.max?.toLocaleString()}
+                </span>
+              </div>
+            )}
+
+            {viewItem.size && (
+              <p className="text-xs text-gray-500 mb-4">
+                📦 Item Size: <b className="capitalize">{viewItem.size}</b>
+              </p>
+            )}
 
             <div className="flex flex-wrap justify-center gap-2 mb-3">
               {viewItem.verified && (

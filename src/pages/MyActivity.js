@@ -1,4 +1,4 @@
-// ✅ FILE: src/pages/MyActivity.jsx
+// ✅ FILE: src/pages/MyActivity.jsx (Lazy-load + Fade-in Images)
 import React, { useState, useEffect, useMemo } from "react";
 import {
   collection,
@@ -7,9 +7,6 @@ import {
   onSnapshot,
   doc,
   getDoc,
-  updateDoc,
-  deleteDoc,
-  serverTimestamp,
   writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase";
@@ -21,7 +18,6 @@ import {
   ChevronRight,
   CheckCircle,
 } from "lucide-react";
-import { useLocation } from "react-router-dom";
 import toast from "react-hot-toast";
 import SubscriptionBanner from "../components/UI/SubscriptionBanner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -61,27 +57,16 @@ const ConfirmModal = ({ message, onConfirm, onCancel }) => (
 );
 
 /* ------------------------------------------------------------------
- * Detail Drawer (simplified for clarity)
+ * Drawer with delivery range & size
  * ------------------------------------------------------------------ */
-const DetailDrawer = ({ open, onClose, data, type }) => {
+const DetailDrawer = ({ open, onClose, data }) => {
   const [imageIndex, setImageIndex] = useState(0);
-
   useEffect(() => {
     if (open) setImageIndex(0);
   }, [open, data]);
 
   if (!open || !data) return null;
   const images = data.images || [data.itemImage || "/images/default-item.jpg"];
-
-  const steps = [
-    { key: "approved", label: "Approved", color: "bg-green-600" },
-    { key: "processing", label: "Processing", color: "bg-purple-600" },
-    { key: "out_for_delivery", label: "Out for Delivery", color: "bg-yellow-500" },
-    { key: "delivered", label: "Delivered", color: "bg-blue-600" },
-  ];
-  const currentIndex = steps.findIndex(
-    (s) => s.key === (data.status || "").toLowerCase()
-  );
 
   return (
     <div
@@ -99,12 +84,14 @@ const DetailDrawer = ({ open, onClose, data, type }) => {
           <X size={20} />
         </button>
 
+        {/* Image Carousel */}
         <div className="relative w-full h-44 bg-gray-100 rounded-lg overflow-hidden mb-3 flex items-center justify-center">
           <img
             src={images[imageIndex]}
             onError={(e) => (e.currentTarget.src = "/images/default-item.jpg")}
             alt="Item"
-            className="object-contain w-full h-full"
+            className="object-contain w-full h-full fade-in"
+            loading="lazy"
           />
           {images.length > 1 && (
             <>
@@ -113,7 +100,7 @@ const DetailDrawer = ({ open, onClose, data, type }) => {
                   e.stopPropagation();
                   setImageIndex((i) => (i - 1 + images.length) % images.length);
                 }}
-                className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/40 text-white rounded-full p-1 hover:bg-black/60 transition"
+                className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/40 text-white rounded-full p-1"
               >
                 <ChevronLeft size={18} />
               </button>
@@ -122,7 +109,7 @@ const DetailDrawer = ({ open, onClose, data, type }) => {
                   e.stopPropagation();
                   setImageIndex((i) => (i + 1) % images.length);
                 }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/40 text-white rounded-full p-1 hover:bg-black/60 transition"
+                className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/40 text-white rounded-full p-1"
               >
                 <ChevronRight size={18} />
               </button>
@@ -137,46 +124,19 @@ const DetailDrawer = ({ open, onClose, data, type }) => {
           {data.description || "No description available."}
         </p>
 
-        {/* Stepper for approved/premium only */}
-        {["premium", "requests"].includes(type) &&
-        ["approved", "processing", "out_for_delivery", "delivered"].includes(
-          (data.status || "").toLowerCase()
-        ) ? (
-          <div className="mt-4">
-            <div className="flex flex-col gap-2 mt-2">
-              {steps.map((step, i) => {
-                const isActive = i <= currentIndex;
-                return (
-                  <div key={step.key} className="flex items-center gap-3">
-                    <div
-                      className={`w-6 h-6 flex items-center justify-center rounded-full ${
-                        isActive
-                          ? `${step.color} text-white`
-                          : "bg-gray-200 text-gray-400"
-                      }`}
-                    >
-                      {isActive && <CheckCircle size={14} />}
-                    </div>
-                    <span
-                      className={`text-sm ${
-                        isActive
-                          ? "text-gray-900 font-medium"
-                          : "text-gray-500"
-                      }`}
-                    >
-                      {step.label}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-            <p className="text-xs text-gray-400 mt-3">
-              💡 You'll be notified as delivery progresses.
-            </p>
+        {/* 🚚 Delivery Info */}
+        {data.estimatedDelivery && (
+          <div className="bg-indigo-50 text-indigo-700 text-sm px-3 py-2 rounded-lg mb-3 flex items-center justify-between">
+            <span className="font-medium">Estimated Delivery Range:</span>
+            <span className="font-semibold">
+              ¥{data.estimatedDelivery.min?.toLocaleString()}–¥
+              {data.estimatedDelivery.max?.toLocaleString()}
+            </span>
           </div>
-        ) : (
-          <p className="text-sm text-gray-700 mb-1">
-            Status: <b>{data.status || "pending"}</b>
+        )}
+        {data.size && (
+          <p className="text-xs text-gray-500 mb-4">
+            📦 Item Size: <b className="capitalize">{data.size}</b>
           </p>
         )}
       </div>
@@ -185,7 +145,7 @@ const DetailDrawer = ({ open, onClose, data, type }) => {
 };
 
 /* ------------------------------------------------------------------
- * Main Page
+ * Main Page (Unified image and item fetch logic)
  * ------------------------------------------------------------------ */
 export default function MyActivity() {
   const { currentUser } = useAuth();
@@ -193,13 +153,15 @@ export default function MyActivity() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [requests, setRequests] = useState([]);
   const [donations, setDonations] = useState([]);
-  const [premiumItems, setPremiumItems] = useState([]);
-  const [drawer, setDrawer] = useState({ open: false, data: null, type: null });
+  const [premiumDeposits, setPremiumDeposits] = useState([]);
+  const [drawer, setDrawer] = useState({ open: false, data: null });
   const [confirmData, setConfirmData] = useState(null);
 
-  /* Firestore listeners */
+  /* ✅ Fetch all item types with unified image logic */
   useEffect(() => {
     if (!currentUser?.uid) return;
+
+    // Requests
     const unsubReq = onSnapshot(
       query(collection(db, "requests"), where("userId", "==", currentUser.uid)),
       async (snap) => {
@@ -216,8 +178,8 @@ export default function MyActivity() {
             return {
               id: d.id,
               ...r,
+              ...itemData,
               itemImage: itemData.images?.[0],
-              itemName: itemData.title,
             };
           })
         );
@@ -225,24 +187,32 @@ export default function MyActivity() {
       }
     );
 
+    // Donations
     const unsubDon = onSnapshot(
       query(collection(db, "donations"), where("donorId", "==", currentUser.uid)),
-      (snap) => setDonations(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+      (snap) =>
+        setDonations(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...d.data(),
+            itemImage: d.data().images?.[0],
+          }))
+        )
     );
 
-    const unsubPremium = onSnapshot(
+    // Premium Deposits
+    const unsubPrem = onSnapshot(
       query(
         collection(db, "donations"),
         where("donorId", "==", currentUser.uid),
         where("type", "==", "premium")
       ),
       (snap) =>
-        setPremiumItems(
+        setPremiumDeposits(
           snap.docs.map((d) => ({
             id: d.id,
             ...d.data(),
             itemImage: d.data().images?.[0],
-            itemTitle: d.data().title,
           }))
         )
     );
@@ -250,23 +220,18 @@ export default function MyActivity() {
     return () => {
       unsubReq();
       unsubDon();
-      unsubPremium();
+      unsubPrem();
     };
   }, [currentUser?.uid]);
 
-  /* Helpers */
   const askConfirm = (message, fn) => setConfirmData({ message, fn });
   const closeConfirm = () => setConfirmData(null);
 
-  const handleDelete = async (ids, typeLabel) => {
+  const handleDelete = async (ids, collectionName) => {
     const batch = writeBatch(db);
-    ids.forEach((id) =>
-      batch.delete(
-        doc(db, typeLabel === "requests" ? "requests" : "donations", id)
-      )
-    );
+    ids.forEach((id) => batch.delete(doc(db, collectionName, id)));
     await batch.commit();
-    toast.success(`Deleted ${ids.length} ${typeLabel}.`);
+    toast.success(`Deleted ${ids.length} item(s).`);
     closeConfirm();
   };
 
@@ -276,113 +241,14 @@ export default function MyActivity() {
         ? requests
         : activeTab === "donations"
         ? donations
-        : premiumItems;
+        : premiumDeposits;
     if (statusFilter === "all") return all;
     return all.filter(
       (i) => (i.status || "").toLowerCase() === statusFilter.toLowerCase()
     );
-  }, [requests, donations, premiumItems, activeTab, statusFilter]);
+  }, [requests, donations, premiumDeposits, activeTab, statusFilter]);
 
-  /* Render Filter Bar */
-  const renderStatusFilter = () => {
-    const statuses = [
-      "all",
-      "pending",
-      "approved",
-      "rejected",
-      "expired",
-      "delivered",
-    ];
-    return (
-      <div className="flex overflow-x-auto gap-2 py-2 scrollbar-hide justify-center">
-        {statuses.map((s) => (
-          <button
-            key={s}
-            onClick={() => setStatusFilter(s)}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap ${
-              statusFilter === s
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            {s.charAt(0).toUpperCase() + s.slice(1)}
-          </button>
-        ))}
-      </div>
-    );
-  };
-
-  /* Render Grid */
-  const renderGrid = (items, type) =>
-    !items.length ? (
-      <p className="text-center text-gray-600 py-8 text-sm">No items yet.</p>
-    ) : (
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 justify-center max-w-[900px] mx-auto">
-        <AnimatePresence>
-          {items.map((i) => (
-            <motion.div
-              key={i.id}
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.25 }}
-              onClick={() => setDrawer({ open: true, data: i, type })}
-              whileHover={{ scale: 1.02 }}
-              className="bg-white border border-gray-100 rounded-xl shadow-sm p-2 flex flex-col active:bg-gray-50 cursor-pointer relative"
-            >
-              <div className="relative w-full h-28 sm:h-32 rounded-lg overflow-hidden mb-2">
-                <img
-                  src={i.itemImage || i.images?.[0] || "/images/default-item.jpg"}
-                  onError={(e) =>
-                    (e.currentTarget.src = "/images/default-item.jpg")
-                  }
-                  alt={i.title || i.itemName || i.itemTitle || "Item"}
-                  className="w-full h-full object-contain"
-                />
-              </div>
-
-              <h3 className="text-xs sm:text-sm font-semibold text-gray-800 truncate mb-1">
-                {i.title || i.itemName || i.itemTitle || "Untitled"}
-              </h3>
-
-              <div className="flex items-center justify-between text-[11px] sm:text-xs text-gray-500 mb-1">
-                <span className="truncate">
-                  {type === "premium"
-                    ? `¥${(i.price || i.amountJPY)?.toLocaleString() || "—"}`
-                    : i.category || i.itemCategory || ""}
-                </span>
-                <span
-                  className={`${
-                    i.status === "active"
-                      ? "text-green-600"
-                      : i.status === "pending"
-                      ? "text-yellow-600"
-                      : "text-gray-500"
-                  } font-medium`}
-                >
-                  {i.status || "pending"}
-                </span>
-              </div>
-
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  askConfirm(
-                    "Delete this item?",
-                    () => handleDelete([i.id], type)
-                  );
-                }}
-                className="absolute top-2 right-2 bg-white/80 text-red-500 hover:text-red-700 rounded-full p-1 shadow-sm transition"
-              >
-                <Trash size={14} />
-              </button>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-    );
-
-  /* Main */
+  /* UI */
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       <SubscriptionBanner />
@@ -398,7 +264,7 @@ export default function MyActivity() {
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
-              className={`flex-1 py-2 relative transition-all duration-200 text-xs ${
+              className={`flex-1 py-2 relative text-xs ${
                 activeTab === t.id
                   ? "text-indigo-700 font-semibold"
                   : "text-gray-600 hover:text-indigo-600"
@@ -415,33 +281,108 @@ export default function MyActivity() {
         </div>
       </div>
 
-      {/* Filter + Delete All */}
-      {renderStatusFilter()}
-      {statusFilter !== "all" && filteredItems.length > 0 && (
-        <div className="flex justify-center mb-2">
+      {/* Filter */}
+      <div className="flex overflow-x-auto gap-2 py-2 scrollbar-hide justify-center">
+        {["all", "pending", "approved", "awarded", "delivered"].map((s) => (
           <button
-            onClick={() =>
-              askConfirm(
-                `Delete all ${statusFilter} items?`,
-                () =>
-                  handleDelete(
-                    filteredItems.map((x) => x.id),
-                    activeTab
-                  )
-              )
-            }
-            className="flex items-center gap-1 bg-rose-100 text-rose-700 px-3 py-1 rounded-full text-xs hover:bg-rose-200"
+            key={s}
+            onClick={() => setStatusFilter(s)}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium ${
+              statusFilter === s
+                ? "bg-indigo-600 text-white"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+            }`}
           >
-            <Trash size={12} /> Delete All Filtered
+            {s.charAt(0).toUpperCase() + s.slice(1)}
           </button>
-        </div>
-      )}
+        ))}
+      </div>
 
-      {/* Main Grid */}
+      {/* Grid */}
       <main className="p-3 min-h-[60vh]">
-        {activeTab === "requests" && renderGrid(filteredItems, "requests")}
-        {activeTab === "donations" && renderGrid(filteredItems, "donations")}
-        {activeTab === "premium" && renderGrid(filteredItems, "premium")}
+        {!filteredItems.length ? (
+          <p className="text-center text-gray-600 py-8 text-sm">No items yet.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 justify-center max-w-[900px] mx-auto">
+            <AnimatePresence>
+              {filteredItems.map((i) => (
+                <motion.div
+                  key={i.id}
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.25 }}
+                  onClick={() => setDrawer({ open: true, data: i })}
+                  whileHover={{ scale: 1.02 }}
+                  className="bg-white border border-gray-100 rounded-xl shadow-sm p-2 flex flex-col active:bg-gray-50 cursor-pointer relative"
+                >
+                  <div className="relative w-full h-28 sm:h-32 rounded-lg overflow-hidden mb-2">
+                    <img
+                      src={i.itemImage || "/images/default-item.jpg"}
+                      alt={i.title || i.itemName || "Item"}
+                      className="w-full h-full object-contain fade-in"
+                      loading="lazy"
+                      onError={(e) => (e.currentTarget.src = "/images/default-item.jpg")}
+                    />
+                    {activeTab === "premium" && (
+                      <div className="absolute top-1 left-1 bg-purple-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">
+                        PREMIUM
+                      </div>
+                    )}
+                  </div>
+
+                  <h3 className="text-xs sm:text-sm font-semibold text-gray-800 truncate mb-1">
+                    {i.title || i.itemName || "Untitled"}
+                  </h3>
+
+                  {activeTab === "premium" && i.price && (
+                    <p className="text-xs font-bold text-purple-600 mb-1">
+                      ¥{i.price.toLocaleString()}
+                    </p>
+                  )}
+
+                  {(i.size || i.estimatedDelivery) && (
+                    <div className="flex justify-between text-[11px] text-gray-500 mb-1">
+                      {i.size && <span>📦 {i.size}</span>}
+                      {i.estimatedDelivery?.min && i.estimatedDelivery?.max && (
+                        <span>
+                          ¥{i.estimatedDelivery.min.toLocaleString()}–
+                          ¥{i.estimatedDelivery.max.toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  <span
+                    className={`text-[11px] ${
+                      i.status === "active"
+                        ? "text-green-600"
+                        : i.status === "pending"
+                        ? "text-yellow-600"
+                        : i.status === "awarded"
+                        ? "text-indigo-600"
+                        : "text-gray-500"
+                    } font-medium`}
+                  >
+                    {i.status || "pending"}
+                  </span>
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      askConfirm("Delete this item?", () =>
+                        handleDelete([i.id], activeTab === "requests" ? "requests" : "donations")
+                      );
+                    }}
+                    className="absolute top-2 right-2 bg-white/80 text-red-500 hover:text-red-700 rounded-full p-1 shadow-sm"
+                  >
+                    <Trash size={14} />
+                  </button>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
       </main>
 
       {confirmData && (
@@ -454,20 +395,21 @@ export default function MyActivity() {
 
       <DetailDrawer
         open={drawer.open}
-        onClose={() => setDrawer({ open: false, data: null, type: null })}
+        onClose={() => setDrawer({ open: false, data: null })}
         data={drawer.data}
-        type={drawer.type}
       />
     </div>
   );
 }
 
-/* Basic animations */
+/* Animations */
 const style = document.createElement("style");
 style.innerHTML = `
 @keyframes fadeIn {from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
 @keyframes slideUp {from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
 .animate-fadeIn{animation:fadeIn .25s ease-out}
 .animate-slideUp{animation:slideUp .3s ease-out}
+.fade-in {opacity:0;animation:fadeImage 0.4s ease-in forwards}
+@keyframes fadeImage {to{opacity:1}}
 `;
 document.head.appendChild(style);

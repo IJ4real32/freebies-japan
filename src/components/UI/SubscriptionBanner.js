@@ -1,25 +1,54 @@
-// ✅ FILE: src/components/UI/SubscriptionBanner.jsx
+// ✅ FILE: src/components/UI/SubscriptionBanner.jsx (Live sync + progress bar)
 import React, { useEffect, useState, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { Gift, Heart, X } from "lucide-react";
 import DonationModal from "../Payments/DonationModal";
+import { doc, onSnapshot } from "firebase/firestore";
+import { db } from "../../firebase";
 
 /**
- * Subscription banner
- * - Shows 3 modes: Trial, Expired, Subscribed
- * - Auto hides on scroll down, reappears on scroll up
- * - Can be closed temporarily (X inside donate button)
- * - Reappears automatically when user returns to /items
+ * Enhanced SubscriptionBanner
+ * - Real-time updates from Firestore `/users/{uid}`
+ * - Animated progress bar for remaining trial credits
+ * - Scroll hide / show behavior
+ * - Temporary close + restore on /items route
  */
 export default function SubscriptionBanner() {
-  const { currentUser, isSubscribed, isTrialExpired, trialCreditsLeft } = useAuth();
+  const { currentUser } = useAuth();
   const location = useLocation();
 
+  const [userData, setUserData] = useState({
+    isSubscribed: false,
+    isTrialExpired: false,
+    trialCreditsLeft: 0,
+  });
   const [hidden, setHidden] = useState(false);
   const [temporarilyClosed, setTemporarilyClosed] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const lastScroll = useRef(0);
+
+  /* ------------------------------------------------------------------
+   * 🔄 Real-time Firestore user listener
+   * ------------------------------------------------------------------ */
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+    const unsub = onSnapshot(doc(db, "users", currentUser.uid), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setUserData((p) => ({
+          ...p,
+          isSubscribed: !!data.isSubscribed,
+          isTrialExpired: !!data.isTrialExpired,
+          trialCreditsLeft:
+            typeof data.trialCreditsLeft === "number"
+              ? data.trialCreditsLeft
+              : 0,
+        }));
+      }
+    });
+    return () => unsub();
+  }, [currentUser?.uid]);
 
   /* ------------------------------------------------------------------
    * 🧭 Scroll hide / show logic
@@ -42,13 +71,14 @@ export default function SubscriptionBanner() {
    * ♻️ Reset banner when user navigates to /items
    * ------------------------------------------------------------------ */
   useEffect(() => {
-    if (location.pathname === "/items") {
-      setTemporarilyClosed(false);
-    }
+    if (location.pathname === "/items") setTemporarilyClosed(false);
   }, [location.pathname]);
 
-  // 🛑 Only render when user is logged in
   if (!currentUser || temporarilyClosed) return null;
+
+  const { isSubscribed, isTrialExpired, trialCreditsLeft } = userData;
+  const trialUsed = Math.max(0, 5 - trialCreditsLeft);
+  const progressPercent = (trialUsed / 5) * 100;
 
   /* ------------------------------------------------------------------
    * 🎨 UI Layout
@@ -63,21 +93,30 @@ export default function SubscriptionBanner() {
         {/* 🟢 Active Trial */}
         {!isSubscribed && !isTrialExpired && (
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm text-gray-800 font-medium relative">
-            <div className="flex items-center justify-center sm:justify-start">
-              <Gift className="w-4 h-4 text-emerald-600 mr-2" />
-              You have{" "}
-              <span className="font-bold text-emerald-700 mx-1">
-                {trialCreditsLeft}
-              </span>{" "}
-              of 5 free requests remaining 🎁
+            <div className="flex-1">
+              <div className="flex items-center justify-center sm:justify-start">
+                <Gift className="w-4 h-4 text-emerald-600 mr-2" />
+                You have{" "}
+                <span className="font-bold text-emerald-700 mx-1">
+                  {trialCreditsLeft}
+                </span>{" "}
+                of 5 free requests remaining 🎁
+              </div>
+              {/* Progress Bar */}
+              <div className="mt-1 h-1.5 w-full bg-gray-200 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-emerald-500 transition-all duration-500"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
             </div>
+
             <div className="relative inline-block">
               <button
                 onClick={() => setShowModal(true)}
                 className="relative bg-emerald-600 hover:bg-emerald-700 text-white text-sm px-5 py-2 rounded-lg shadow transition flex items-center gap-2 pr-8"
               >
                 Donate ¥1,500
-                {/* ❌ Contained close button */}
                 <span
                   onClick={(e) => {
                     e.stopPropagation();
@@ -124,7 +163,7 @@ export default function SubscriptionBanner() {
 
         {/* 💖 Subscribed */}
         {isSubscribed && (
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm font-medium text-gray-800">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm font-medium text-gray-800 animate-fadeIn">
             <div className="flex items-center justify-center sm:justify-start">
               <Heart className="w-4 h-4 text-pink-600 mr-2" />
               <span className="text-pink-700">
@@ -157,3 +196,11 @@ export default function SubscriptionBanner() {
     </>
   );
 }
+
+/* Basic Animations */
+const style = document.createElement("style");
+style.innerHTML = `
+@keyframes fadeIn {from{opacity:0}to{opacity:1}}
+.animate-fadeIn{animation:fadeIn .6s ease-in}
+`;
+document.head.appendChild(style);

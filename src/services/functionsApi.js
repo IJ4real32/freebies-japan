@@ -149,8 +149,13 @@ export const adminCreateSponsoredDonation = async ({
   if (!title) throw new Error("title is required");
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "adminCreateSponsoredDonation");
-  // Explicitly include active status (matches backend expectation)
-  const res = await callable({ title, description, images, durationHours, status: "active" });
+  const res = await callable({
+    title,
+    description,
+    images,
+    durationHours,
+    status: "active",
+  });
   return res?.data || { ok: false };
 };
 
@@ -221,13 +226,29 @@ export const sendAdminItemStatusEmail = async ({
     throw new Error("userEmail, requestId, and status required");
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "sendAdminItemStatusEmail");
-  const res = await callable({
-    requestId,
-    status,
-    userEmail,
-    itemTitle,
-    note,
-  });
+  const res = await callable({ requestId, status, userEmail, itemTitle, note });
+  return res?.data || { ok: false };
+};
+
+/* =====================================================
+   ✅ Logistics: Delivery & Shipment (Phase 2)
+   ===================================================== */
+
+// 🧩 Recipient confirms or declines delivery
+export const recipientConfirmDelivery = async ({ donationId, accepted }) => {
+  if (!donationId) throw new Error("donationId required");
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "recipientConfirmDelivery");
+  const res = await callable({ donationId, accepted });
+  return res?.data || { ok: false };
+};
+
+// 🧩 Admin/system triggers shipment booking (mock/test)
+export const triggerShipmentBooking = async ({ donationId }) => {
+  if (!donationId) throw new Error("donationId required");
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "triggerShipmentBooking");
+  const res = await callable({ donationId });
   return res?.data || { ok: false };
 };
 

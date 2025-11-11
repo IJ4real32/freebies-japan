@@ -1,4 +1,4 @@
-// ✅ FILE: src/pages/AdminPickups.js (Desktop-first unified admin layout)
+// ✅ FILE: src/pages/AdminPickups.js (Unified + Polished)
 import React, { useEffect, useState } from "react";
 import {
   collection,
@@ -9,6 +9,7 @@ import {
   doc,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { useAuth } from "../contexts/AuthContext";
 import toast from "react-hot-toast";
 import { Link } from "react-router-dom";
 import {
@@ -21,36 +22,52 @@ import {
   Home,
   ChevronRight,
   RefreshCcw,
+  Loader2,
 } from "lucide-react";
 import { sendAdminItemStatusEmail } from "../services/functionsApi";
-import { isAdmin } from "../utils/adminUtils";
 
 export default function AdminPickups() {
+  const { isAdmin, isAuthenticated } = useAuth();
   const [pickups, setPickups] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("scheduled");
+  const [filter, setFilter] = useState("");
   const [search, setSearch] = useState("");
   const [updating, setUpdating] = useState({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // ✅ Live load pickups
+  /* --------------------------------------------------------
+   * 🕹️ Load Data (Real-time)
+   * -------------------------------------------------------- */
   useEffect(() => {
-    const load = async () => {
-      const ok = await isAdmin();
-      if (!ok) return (window.location.href = "/unauthorized");
+    if (!isAuthenticated) return (window.location.href = "/login");
+    if (!isAdmin()) return (window.location.href = "/unauthorized");
 
-      const q = query(collection(db, "pickups"), orderBy("createdAt", "desc"));
-      const unsub = onSnapshot(q, (snap) => {
-        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setPickups(rows);
-        setLoading(false);
-      });
-      return () => unsub();
-    };
-    load();
-  }, []);
+    const q = query(collection(db, "pickups"), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setPickups(rows);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, [isAuthenticated, isAdmin]);
 
-  // ✅ Filter and search
+  /* --------------------------------------------------------
+   * 📅 Helper: Format Date
+   * -------------------------------------------------------- */
+  const formatDate = (v) => {
+    if (!v) return "—";
+    const d = v?.seconds ? new Date(v.seconds * 1000) : new Date(v);
+    return d.toLocaleString("ja-JP", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  /* --------------------------------------------------------
+   * 🔍 Filter and Search Logic
+   * -------------------------------------------------------- */
   const filtered = pickups.filter(
     (p) =>
       (!filter || p.status === filter) &&
@@ -59,31 +76,43 @@ export default function AdminPickups() {
         p.method?.toLowerCase().includes(search.toLowerCase()))
   );
 
+  /* --------------------------------------------------------
+   * 🧾 Update Pickup Status
+   * -------------------------------------------------------- */
   const handleUpdate = async (p, newStatus) => {
     if (!window.confirm(`Change status to "${newStatus}"?`)) return;
     setUpdating((prev) => ({ ...prev, [p.id]: true }));
+
     try {
       await updateDoc(doc(db, "pickups", p.id), {
         status: newStatus,
         updatedAt: new Date(),
       });
-      toast.success(`Pickup marked as ${newStatus}`);
+
       await sendAdminItemStatusEmail({
         userEmail: p.userEmail,
         status: `Pickup ${newStatus}`,
         itemTitle: `Item ID: ${p.itemId}`,
       });
+
+      toast.success(
+        `✅ Pickup for Item ${p.itemId} marked as ${newStatus.toUpperCase()}`
+      );
     } catch (err) {
       console.error(err);
-      toast.error("Failed to update pickup");
+      toast.error("❌ Failed to update pickup status");
     } finally {
       setUpdating((prev) => ({ ...prev, [p.id]: false }));
     }
   };
 
+  /* --------------------------------------------------------
+   * 🖥️ UI
+   * -------------------------------------------------------- */
   if (loading)
     return (
       <div className="flex min-h-screen items-center justify-center text-gray-600">
+        <Loader2 className="animate-spin w-6 h-6 mr-2" />
         Loading pickups…
       </div>
     );
@@ -105,6 +134,7 @@ export default function AdminPickups() {
             <X size={18} />
           </button>
         </div>
+
         <nav className="p-4 space-y-3 text-sm">
           <Link to="/admin" className="block px-3 py-2 rounded hover:bg-white/10">
             🏠 Dashboard
@@ -152,7 +182,9 @@ export default function AdminPickups() {
                 <Home size={14} /> Dashboard
               </Link>
               <ChevronRight size={14} className="mx-1" />
-              <span className="text-gray-800 font-medium">Pickups & Deliveries</span>
+              <span className="text-gray-800 font-medium">
+                Pickups & Deliveries
+              </span>
             </div>
           </div>
 
@@ -172,7 +204,7 @@ export default function AdminPickups() {
             </h1>
 
             {/* Filter bar */}
-            <div className="flex flex-wrap items-center gap-3 mb-5">
+            <div className="flex flex-wrap items-center gap-3 mb-6">
               <select
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
@@ -184,7 +216,10 @@ export default function AdminPickups() {
                 <option value="cancelled">Cancelled</option>
               </select>
               <div className="relative">
-                <Search size={16} className="absolute left-2 top-2.5 text-gray-400" />
+                <Search
+                  size={16}
+                  className="absolute left-2 top-2.5 text-gray-400"
+                />
                 <input
                   type="text"
                   placeholder="Search note or method"
@@ -194,44 +229,40 @@ export default function AdminPickups() {
                 />
               </div>
               <span className="text-xs text-gray-500">
-                {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+                {filtered.length} record{filtered.length !== 1 ? "s" : ""}
               </span>
             </div>
 
             {/* Pickup list */}
             {filtered.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">No records found.</p>
+              <p className="text-gray-500 text-center py-8">
+                No pickup or delivery records found.
+              </p>
             ) : (
               <div className="grid grid-cols-1 gap-4">
                 {filtered.map((p) => (
                   <div
                     key={p.id}
-                    className="border rounded-xl bg-white shadow-sm p-4 flex flex-col sm:flex-row justify-between"
+                    className="border rounded-xl bg-white shadow-sm p-4 flex flex-col sm:flex-row justify-between hover:shadow-md transition-all duration-200"
                   >
                     <div>
-                      <p className="text-sm text-gray-600">
-                        <strong>Method:</strong> {p.method}
+                      <p className="text-sm text-gray-700 font-medium">
+                        Method:{" "}
+                        <span className="font-semibold text-indigo-700">
+                          {p.method || "—"}
+                        </span>
                       </p>
-                      <p className="text-sm text-gray-600">
-                        <strong>Scheduled:</strong>{" "}
-                        {p.scheduledDate
-                          ? new Date(
-                              p.scheduledDate.seconds
-                                ? p.scheduledDate.seconds * 1000
-                                : p.scheduledDate
-                            ).toLocaleString()
-                          : "N/A"}
+                      <p className="text-sm text-gray-600 mt-1">
+                        Scheduled:{" "}
+                        <b>{p.scheduledDate ? formatDate(p.scheduledDate) : "N/A"}</b>
                       </p>
                       {p.adminNote && (
-                        <p className="text-sm text-gray-500 mt-1">
+                        <p className="text-xs text-gray-500 mt-1 italic">
                           Note: {p.adminNote}
                         </p>
                       )}
                       <p className="text-xs text-gray-400 mt-1">
-                        Created:{" "}
-                        {p.createdAt?.seconds
-                          ? new Date(p.createdAt.seconds * 1000).toLocaleString()
-                          : ""}
+                        Created: {formatDate(p.createdAt)}
                       </p>
                     </div>
 
@@ -242,7 +273,7 @@ export default function AdminPickups() {
                             ? "bg-yellow-100 text-yellow-700"
                             : p.status === "completed"
                             ? "bg-green-100 text-green-700"
-                            : "bg-red-100 text-red-700"
+                            : "bg-rose-100 text-rose-700"
                         }`}
                       >
                         {p.status}
@@ -255,14 +286,24 @@ export default function AdminPickups() {
                             onClick={() => handleUpdate(p, "completed")}
                             className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 rounded-full"
                           >
-                            <CheckCircle size={12} /> Done
+                            {updating[p.id] ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : (
+                              <CheckCircle size={12} />
+                            )}
+                            Done
                           </button>
                           <button
                             disabled={updating[p.id]}
                             onClick={() => handleUpdate(p, "cancelled")}
-                            className="flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1 rounded-full"
+                            className="flex items-center gap-1 bg-rose-600 hover:bg-rose-700 text-white text-xs px-3 py-1 rounded-full"
                           >
-                            <XCircle size={12} /> Cancel
+                            {updating[p.id] ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : (
+                              <XCircle size={12} />
+                            )}
+                            Cancel
                           </button>
                         </>
                       )}
