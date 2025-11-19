@@ -13,8 +13,13 @@ import {
   X,
   Home,
   ChevronRight,
+  Calendar,
+  Clock,
+  Loader2,
 } from "lucide-react";
-import { isAdmin } from "../utils/adminUtils";
+import { checkAdminStatus } from "../utils/adminUtils";
+
+
 import { adminGetPaymentQueue, ping } from "../services/functionsApi";
 import toast from "react-hot-toast";
 
@@ -53,7 +58,7 @@ export default function AdminPaymentsQueue() {
     try {
       setLoading(true);
       setError(null);
-      const ok = await isAdmin();
+      const ok = await checkAdminStatus();
       if (!ok) {
         navigate("/unauthorized");
         return;
@@ -68,7 +73,14 @@ export default function AdminPaymentsQueue() {
       if (!aliveRef.current) return;
 
       const list = res?.payments || res?.data?.payments || [];
-      const enriched = list.map((p) => ({
+      // ✅ ENSURE descending order by createdAt (most recent first)
+      const sortedList = list.sort((a, b) => {
+        const aTime = new Date(a.createdAt?.seconds * 1000 || a.createdAt || 0);
+        const bTime = new Date(b.createdAt?.seconds * 1000 || b.createdAt || 0);
+        return bTime - aTime; // Descending order
+      });
+
+      const enriched = sortedList.map((p) => ({
         ...p,
         _type:
           p.type === "subscription" || p.type === "item"
@@ -125,6 +137,27 @@ export default function AdminPaymentsQueue() {
         });
   };
 
+  const formatTimeAgo = (v) => {
+    if (!v) return "—";
+    const d = typeof v === "object" && typeof v.seconds === "number"
+      ? new Date(v.seconds * 1000)
+      : new Date(v);
+    
+    if (isNaN(d.getTime())) return "—";
+    
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return formatDate(v);
+  };
+
   const getStatusBadgeClass = (status) => {
     switch (status) {
       case "pending":
@@ -160,10 +193,12 @@ export default function AdminPaymentsQueue() {
   };
 
   /* -------------------------------------------------------
-   * Search + Sort
+   * Search + Sort with ENSURED DESCENDING ORDER
    * ------------------------------------------------------- */
   const filteredPayments = useMemo(() => {
     let result = payments;
+    
+    // Apply search filter
     if (search.trim()) {
       const s = search.toLowerCase();
       result = result.filter(
@@ -174,6 +209,7 @@ export default function AdminPaymentsQueue() {
       );
     }
 
+    // Apply sorting
     if (sort.field) {
       result = [...result].sort((a, b) => {
         const dir = sort.direction === "asc" ? 1 : -1;
@@ -188,6 +224,13 @@ export default function AdminPaymentsQueue() {
           return (aDate - bDate) * dir;
         }
         return 0;
+      });
+    } else {
+      // ✅ DEFAULT: Ensure descending order by createdAt (most recent first)
+      result = [...result].sort((a, b) => {
+        const aDate = new Date(a.createdAt?.seconds * 1000 || a.createdAt || 0);
+        const bDate = new Date(b.createdAt?.seconds * 1000 || b.createdAt || 0);
+        return bDate - aDate; // Descending order
       });
     }
 
@@ -210,6 +253,19 @@ export default function AdminPaymentsQueue() {
       <ArrowDown size={14} className="inline text-blue-600" />
     );
   };
+
+  /* -------------------------------------------------------
+   * Statistics
+   * ------------------------------------------------------- */
+  const stats = useMemo(() => {
+    const total = payments.length;
+    const pending = payments.filter(p => p.status === "pending").length;
+    const awaiting = payments.filter(p => p.status === "awaiting_approval").length;
+    const approved = payments.filter(p => p.status === "approved").length;
+    const verified = payments.filter(p => p.status === "verified").length;
+    
+    return { total, pending, awaiting, approved, verified };
+  }, [payments]);
 
   /* -------------------------------------------------------
    * UI
@@ -286,6 +342,32 @@ export default function AdminPaymentsQueue() {
           </button>
         </header>
 
+        {/* Statistics */}
+        <section className="p-4 bg-white border-b">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 max-w-6xl mx-auto">
+            <div className="bg-blue-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-blue-700 font-medium">Total</p>
+              <p className="text-2xl font-bold text-blue-800">{stats.total}</p>
+            </div>
+            <div className="bg-yellow-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-yellow-700 font-medium">Pending</p>
+              <p className="text-2xl font-bold text-yellow-800">{stats.pending}</p>
+            </div>
+            <div className="bg-blue-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-blue-700 font-medium">Awaiting</p>
+              <p className="text-2xl font-bold text-blue-800">{stats.awaiting}</p>
+            </div>
+            <div className="bg-green-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-green-700 font-medium">Approved</p>
+              <p className="text-2xl font-bold text-green-800">{stats.approved}</p>
+            </div>
+            <div className="bg-emerald-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-emerald-700 font-medium">Verified</p>
+              <p className="text-2xl font-bold text-emerald-800">{stats.verified}</p>
+            </div>
+          </div>
+        </section>
+
         {/* Body */}
         <section className="p-8">
           <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-6">
@@ -338,11 +420,13 @@ export default function AdminPaymentsQueue() {
             <div className="bg-white border rounded-lg overflow-hidden shadow-sm">
               {loading ? (
                 <div className="px-6 py-8 text-center text-gray-500">
-                  Loading payments…
+                  <Loader2 size={24} className="animate-spin mx-auto mb-2" />
+                  <p>Loading payments...</p>
                 </div>
               ) : filteredPayments.length === 0 ? (
                 <div className="px-6 py-8 text-center text-gray-500">
-                  No records found.
+                  <Calendar size={48} className="mx-auto mb-2 text-gray-300" />
+                  <p>No payments found</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -364,7 +448,10 @@ export default function AdminPaymentsQueue() {
                           className="px-4 py-3 font-semibold cursor-pointer select-none"
                           onClick={() => toggleSort("createdAt")}
                         >
-                          Created {renderSortIcon("createdAt")}
+                          <div className="flex items-center gap-1">
+                            <Clock size={14} />
+                            Created {renderSortIcon("createdAt")}
+                          </div>
                         </th>
                         <th className="px-4 py-3 font-semibold">Actions</th>
                       </tr>
@@ -412,7 +499,10 @@ export default function AdminPaymentsQueue() {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-gray-600">
-                            {formatDate(p.createdAt)}
+                            <div className="flex flex-col">
+                              <span className="text-sm">{formatDate(p.createdAt)}</span>
+                              <span className="text-xs text-gray-400">{formatTimeAgo(p.createdAt)}</span>
+                            </div>
                           </td>
                           <td className="px-4 py-3">
                             <button

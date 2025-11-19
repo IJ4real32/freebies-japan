@@ -1,4 +1,4 @@
-// ✅ FILE: src/pages/RequestsAdmin.js (Full Patched Version)
+// ✅ FILE: src/pages/RequestsAdmin.js (FULLY PATCHED VERSION)
 import React, { useEffect, useState, useMemo } from "react";
 import {
   collection,
@@ -8,6 +8,7 @@ import {
   getDocs,
   query,
   where,
+  orderBy,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
@@ -24,6 +25,8 @@ import {
   ChevronRight,
   Filter,
   Loader2,
+  Clock,
+  Calendar,
 } from "lucide-react";
 
 /* --------------------------------------------------------
@@ -38,6 +41,22 @@ const formatDate = (v) => {
     hour: "2-digit",
     minute: "2-digit",
   });
+};
+
+const formatTimeAgo = (v) => {
+  if (!v) return "—";
+  const d = v?.toDate?.() || new Date(v);
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return formatDate(v);
 };
 
 const statusColors = {
@@ -101,18 +120,40 @@ export default function RequestsAdmin() {
   });
 
   /* --------------------------------------------------------
-   * 🔐 Guard: Only admins can access
+   * 🔐 Guard: Only admins can access - FIXED
    * -------------------------------------------------------- */
   useEffect(() => {
-    if (!isAuthenticated) return navigate("/login");
-    if (!isAdmin()) return navigate("/unauthorized");
+    console.log("🔐 RequestsAdmin - Auth check:", { isAuthenticated, isAdmin });
+    
+    if (!isAuthenticated) {
+      navigate("/login");
+      return;
+    }
+    
+    // ✅ FIXED: Use isAdmin property directly instead of checkAdminStatus function
+    if (!isAdmin) {
+      console.warn("⚠️ User is not admin, redirecting to unauthorized");
+      navigate("/unauthorized");
+      return;
+    }
+    
+    console.log("✅ Admin access granted to RequestsAdmin");
   }, [isAuthenticated, isAdmin, navigate]);
 
   /* --------------------------------------------------------
-   * 📡 Load all requests in real-time
+   * 📡 Load all requests in real-time WITH DESCENDING ORDER
    * -------------------------------------------------------- */
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "requests"), async (snap) => {
+    // Only load requests if user is authenticated and admin
+    if (!isAuthenticated || !isAdmin) return;
+
+    // ✅ FIXED: Query with descending order by createdAt
+    const q = query(
+      collection(db, "requests"),
+      orderBy("createdAt", "desc") // Most recent first
+    );
+    
+    const unsub = onSnapshot(q, async (snap) => {
       const base = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       const enriched = await Promise.all(
         base.map(async (r) => {
@@ -138,13 +179,17 @@ export default function RequestsAdmin() {
       );
       setRequests(enriched);
       setLoading(false);
+    }, (err) => {
+      console.error("Error loading requests:", err);
+      setError("Failed to load requests");
+      setLoading(false);
     });
 
     return () => unsub();
-  }, []);
+  }, [isAuthenticated, isAdmin]);
 
   /* --------------------------------------------------------
-   * ✅ Manual Approve
+   * ✅ Manual Approve - FIXED: Changed "approved" to "awarded"
    * -------------------------------------------------------- */
   const handleManualApprove = async (req) => {
     if (
@@ -155,15 +200,17 @@ export default function RequestsAdmin() {
       return;
     setActionBusy((s) => ({ ...s, approve: req.id }));
     try {
-      await adminUpdateRequestStatus({ requestId: req.id, status: "approved" });
+      // 🎯 CRITICAL FIX: Changed "approved" to "awarded" to trigger delivery flow
+      await adminUpdateRequestStatus({ requestId: req.id, status: "awarded" });
       await sendAdminItemStatusEmail({
         requestId: req.id,
         userEmail: req.userEmail,
-        status: "approved",
+        status: "awarded", // Also update email status
         itemTitle: req.itemTitle,
       });
       toast.success(`✅ ${req.userName} manually approved.`);
     } catch (err) {
+      console.error("Manual approve error:", err);
       toast.error("Failed to approve manually.");
     } finally {
       setActionBusy((s) => ({ ...s, approve: null }));
@@ -185,6 +232,7 @@ export default function RequestsAdmin() {
       });
       toast.success(`📦 "${req.itemTitle}" marked delivered.`);
     } catch (e) {
+      console.error("Mark delivered error:", e);
       toast.error("Failed to mark delivered.");
     } finally {
       setActionBusy((s) => ({ ...s, deliver: null }));
@@ -228,6 +276,7 @@ export default function RequestsAdmin() {
         requests: all,
       });
     } catch (err) {
+      console.error("View user error:", err);
       toast.error("Failed to load user info.");
     } finally {
       setActionBusy((s) => ({ ...s, view: null }));
@@ -238,9 +287,46 @@ export default function RequestsAdmin() {
    * 🔍 Filter Requests by Status
    * -------------------------------------------------------- */
   const filtered = useMemo(() => {
-    if (filter === "all") return requests;
-    return requests.filter((r) => (r.status || "pending") === filter);
+    let result = requests;
+    
+    // Apply status filter
+    if (filter !== "all") {
+      result = result.filter((r) => (r.status || "pending") === filter);
+    }
+    
+    // ✅ ENSURE descending order by createdAt (most recent first)
+    return result.sort((a, b) => {
+      const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
+      const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
+      return bTime - aTime; // Descending order
+    });
   }, [requests, filter]);
+
+  /* --------------------------------------------------------
+   * 📊 Statistics - UPDATED: Changed "approved" to "awarded"
+   * -------------------------------------------------------- */
+  const stats = useMemo(() => {
+    const total = requests.length;
+    const pending = requests.filter(r => (r.status || "pending") === "pending").length;
+    const awarded = requests.filter(r => ["approved", "awarded"].includes(r.status || "")).length;
+    const delivered = requests.filter(r => ["delivered", "completed"].includes(r.status || "")).length;
+    
+    return { total, pending, awarded, delivered };
+  }, [requests]);
+
+  /* --------------------------------------------------------
+   * ⏳ Loading State for Non-Admins
+   * -------------------------------------------------------- */
+  if (!isAuthenticated || !isAdmin) {
+    return (
+      <div className="flex justify-center items-center h-screen bg-gray-100">
+        <div className="text-center">
+          <Loader2 size={32} className="animate-spin mx-auto mb-4 text-blue-600" />
+          <p className="text-gray-600">Verifying admin access...</p>
+        </div>
+      </div>
+    );
+  }
 
   /* --------------------------------------------------------
    * 🖥️ Render Layout
@@ -312,17 +398,44 @@ export default function RequestsAdmin() {
               <option value="all">All</option>
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
+              <option value="awarded">Awarded</option>
               <option value="delivered">Delivered</option>
               <option value="rejected">Rejected</option>
             </select>
           </div>
         </header>
 
+        {/* Statistics */}
+        <section className="p-4 bg-white border-b">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto">
+            <div className="bg-blue-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-blue-700 font-medium">Total Requests</p>
+              <p className="text-2xl font-bold text-blue-800">{stats.total}</p>
+            </div>
+            <div className="bg-yellow-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-yellow-700 font-medium">Pending</p>
+              <p className="text-2xl font-bold text-yellow-800">{stats.pending}</p>
+            </div>
+            <div className="bg-green-50 p-4 rounded-lg text-center">
+              {/* ✅ UPDATED: Changed "Approved" to "Awarded" */}
+              <p className="text-sm text-green-700 font-medium">Awarded</p>
+              <p className="text-2xl font-bold text-green-800">{stats.awarded}</p>
+            </div>
+            <div className="bg-purple-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-purple-700 font-medium">Delivered</p>
+              <p className="text-2xl font-bold text-purple-800">{stats.delivered}</p>
+            </div>
+          </div>
+        </section>
+
         {/* Table */}
         <section className="p-8">
           <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
             {loading ? (
-              <p className="text-center text-gray-500 py-6">Loading requests...</p>
+              <div className="text-center text-gray-500 py-6">
+                <Loader2 size={24} className="animate-spin mx-auto mb-2" />
+                <p>Loading requests...</p>
+              </div>
             ) : error ? (
               <p className="text-red-600 p-4">{error}</p>
             ) : (
@@ -333,6 +446,12 @@ export default function RequestsAdmin() {
                       <th className="px-4 py-3 text-left font-semibold">User</th>
                       <th className="px-4 py-3 text-left font-semibold">Item</th>
                       <th className="px-4 py-3 text-left font-semibold">Status</th>
+                      <th className="px-4 py-3 text-left font-semibold">
+                        <div className="flex items-center gap-1">
+                          <Clock size={14} />
+                          Requested
+                        </div>
+                      </th>
                       <th className="px-4 py-3 text-left font-semibold">Updated</th>
                       <th className="px-4 py-3 text-right font-semibold">Actions</th>
                     </tr>
@@ -362,7 +481,16 @@ export default function RequestsAdmin() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-500">
-                          {formatDate(r.lastStatusUpdate)}
+                          <div className="flex flex-col">
+                            <span className="font-medium">{formatDate(r.createdAt)}</span>
+                            <span className="text-gray-400">{formatTimeAgo(r.createdAt)}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-500">
+                          <div className="flex flex-col">
+                            <span>{formatDate(r.lastStatusUpdate)}</span>
+                            <span className="text-gray-400">{formatTimeAgo(r.lastStatusUpdate)}</span>
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex justify-end gap-2 flex-wrap">
@@ -374,6 +502,7 @@ export default function RequestsAdmin() {
                                 color="blue"
                               />
                             )}
+                            {/* ✅ UPDATED: Include both "approved" and "awarded" statuses */}
                             {["approved", "awarded"].includes(r.status) && (
                               <AdminButton
                                 label="Delivered"
@@ -394,6 +523,12 @@ export default function RequestsAdmin() {
                     ))}
                   </tbody>
                 </table>
+                {filtered.length === 0 && (
+                  <div className="text-center text-gray-500 py-8">
+                    <Calendar size={48} className="mx-auto mb-2 text-gray-300" />
+                    <p>No requests found</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -460,7 +595,7 @@ export default function RequestsAdmin() {
                     </span>
                   </div>
                   <div className="text-xs text-gray-400 mt-1">
-                    {formatDate(r.lastStatusUpdate)}
+                    {formatDate(r.createdAt)} • {formatTimeAgo(r.createdAt)}
                   </div>
                 </li>
               ))}

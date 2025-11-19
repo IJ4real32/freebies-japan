@@ -11,7 +11,9 @@ import { db, functions } from "../firebase";
 import { httpsCallable } from "firebase/functions";
 import BackToDashboardButton from "../components/Admin/BackToDashboardButton";
 import toast from "react-hot-toast";
-import { isAdmin } from "../utils/adminUtils";
+import { checkAdminStatus } from "../utils/adminUtils";
+
+
 
 export default function DepositInstructions() {
   const location = useLocation();
@@ -38,7 +40,7 @@ export default function DepositInstructions() {
 
   // 🔹 Detect admin + load donation
   useEffect(() => {
-    (async () => setAdmin(await isAdmin()))();
+    (async () => setAdmin(await checkAdminStatus()))();
 
     if (!donationId) {
       setError("Donation ID missing.");

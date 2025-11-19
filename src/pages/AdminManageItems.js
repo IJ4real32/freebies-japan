@@ -9,15 +9,19 @@ import {
   deleteDoc,
   doc,
   getCountFromServer,
+  orderBy,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../firebase";
 import { sendAdminItemStatusEmail } from "../services/functionsApi";
 import toast from "react-hot-toast";
+import { checkAdminStatus } from "../utils/adminUtils";
+
+
 import {
   Plus, RefreshCcw, CheckCircle, XCircle, Trash2,
   Mail, MapPin, User, Search, Filter, Menu, X,
-  Home, ChevronRight, Loader2
+  Home, ChevronRight, Loader2, Calendar, Clock
 } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
 
@@ -31,10 +35,15 @@ export default function AdminManageItems() {
   const navigate = useNavigate();
 
   /* --------------------------------------------------------
-   * 🔄 Real-time Items Stream
+   * 🔄 Real-time Items Stream WITH DESCENDING ORDER
    * -------------------------------------------------------- */
   useEffect(() => {
-    const q = query(collection(db, "donations"));
+    // ✅ FIXED: Query with descending order by createdAt
+    const q = query(
+      collection(db, "donations"),
+      orderBy("createdAt", "desc") // Most recent first
+    );
+    
     const unsub = onSnapshot(q, async (snap) => {
       try {
         const list = await Promise.all(
@@ -42,7 +51,11 @@ export default function AdminManageItems() {
             const data = d.data();
             const reqQ = query(collection(db, "requests"), where("itemId", "==", d.id));
             const reqCount = await getCountFromServer(reqQ);
-            return { id: d.id, ...data, requestsCount: reqCount.data().count };
+            return { 
+              id: d.id, 
+              ...data, 
+              requestsCount: reqCount.data().count 
+            };
           })
         );
         setItems(list);
@@ -118,10 +131,12 @@ export default function AdminManageItems() {
   };
 
   /* --------------------------------------------------------
-   * 🔍 Filter Logic
+   * 🔍 Filter Logic with ENSURED DESCENDING ORDER
    * -------------------------------------------------------- */
   const filtered = useMemo(() => {
     let arr = items;
+    
+    // Apply search filter
     if (search.trim()) {
       const q = search.toLowerCase();
       arr = arr.filter(
@@ -131,12 +146,62 @@ export default function AdminManageItems() {
           i.id?.toLowerCase().includes(q)
       );
     }
+    
+    // Apply status filters
     if (filter === "verified") arr = arr.filter((i) => i.verified);
     if (filter === "unverified") arr = arr.filter((i) => !i.verified);
     if (filter === "premium") arr = arr.filter((i) => i.type === "premium");
     if (filter === "free") arr = arr.filter((i) => i.type !== "premium");
-    return arr;
+    
+    // ✅ ENSURE descending order by createdAt (most recent first)
+    return arr.sort((a, b) => {
+      const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
+      const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
+      return bTime - aTime; // Descending order
+    });
   }, [items, search, filter]);
+
+  /* --------------------------------------------------------
+   * 📊 Statistics
+   * -------------------------------------------------------- */
+  const stats = useMemo(() => {
+    const total = items.length;
+    const verified = items.filter(item => item.verified).length;
+    const premium = items.filter(item => item.type === "premium").length;
+    const active = items.filter(item => item.status === "active").length;
+    
+    return { total, verified, premium, active };
+  }, [items]);
+
+  /* --------------------------------------------------------
+   * 🕒 Date Formatting Helpers
+   * -------------------------------------------------------- */
+  const formatDate = (v) => {
+    if (!v) return "—";
+    const d = v?.toDate?.() || new Date(v);
+    return d.toLocaleString("ja-JP", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const formatTimeAgo = (v) => {
+    if (!v) return "—";
+    const d = v?.toDate?.() || new Date(v);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return formatDate(v);
+  };
 
   /* --------------------------------------------------------
    * 🖥️ Admin Layout
@@ -210,6 +275,28 @@ export default function AdminManageItems() {
           </button>
         </header>
 
+        {/* Statistics */}
+        <section className="p-4 bg-white border-b">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto">
+            <div className="bg-blue-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-blue-700 font-medium">Total Items</p>
+              <p className="text-2xl font-bold text-blue-800">{stats.total}</p>
+            </div>
+            <div className="bg-green-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-green-700 font-medium">Verified</p>
+              <p className="text-2xl font-bold text-green-800">{stats.verified}</p>
+            </div>
+            <div className="bg-purple-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-purple-700 font-medium">Premium</p>
+              <p className="text-2xl font-bold text-purple-800">{stats.premium}</p>
+            </div>
+            <div className="bg-orange-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-orange-700 font-medium">Active</p>
+              <p className="text-2xl font-bold text-orange-800">{stats.active}</p>
+            </div>
+          </div>
+        </section>
+
         {/* Body */}
         <section className="p-8">
           <div className="bg-white border rounded-lg shadow-sm p-6">
@@ -248,7 +335,19 @@ export default function AdminManageItems() {
               </div>
             </div>
 
-            {loading && <p className="text-gray-500">Loading donations…</p>}
+            {loading && (
+              <div className="text-center text-gray-500 py-6">
+                <Loader2 size={24} className="animate-spin mx-auto mb-2" />
+                <p>Loading items...</p>
+              </div>
+            )}
+
+            {!loading && filtered.length === 0 && (
+              <div className="text-center text-gray-500 py-8">
+                <Calendar size={48} className="mx-auto mb-2 text-gray-300" />
+                <p>No items found</p>
+              </div>
+            )}
 
             {!loading &&
               filtered.map((item) => (
@@ -285,6 +384,21 @@ export default function AdminManageItems() {
                       <p className="text-sm text-gray-600 mb-2">
                         {item.description || "No description provided."}
                       </p>
+                      
+                      {/* Time Information */}
+                      <div className="flex items-center gap-4 text-xs text-gray-500 mb-3">
+                        <div className="flex items-center gap-1">
+                          <Clock size={12} />
+                          <span>Created: {formatDate(item.createdAt)}</span>
+                          <span className="text-gray-400 ml-1">({formatTimeAgo(item.createdAt)})</span>
+                        </div>
+                        {item.updatedAt && (
+                          <div className="flex items-center gap-1">
+                            <span>Updated: {formatDate(item.updatedAt)}</span>
+                          </div>
+                        )}
+                      </div>
+
                       <div className="text-sm text-gray-600 space-y-1">
                         {item.ownerEmail && (
                           <div className="flex items-center gap-1">

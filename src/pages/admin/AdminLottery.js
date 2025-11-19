@@ -1,5 +1,5 @@
 // ✅ FILE: src/pages/admin/AdminLottery.js (Desktop-first, Collapsible Sidebar)
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   collection,
   getDocs,
@@ -7,12 +7,18 @@ import {
   getDoc,
   query,
   where,
+  orderBy,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import { isAdmin } from "../../utils/adminUtils";
+import { checkAdminStatus } from "../../utils/adminUtils";
+
 import { Link, useNavigate } from "react-router-dom";
-import { Menu, X, Home, ChevronRight, RefreshCcw } from "lucide-react";
+import { 
+  Menu, X, Home, ChevronRight, RefreshCcw, 
+  Calendar, Clock, Loader2, Ticket, Crown,
+  ArrowUpDown, ArrowDown, ArrowUp, Search, Filter
+} from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function AdminLottery() {
@@ -21,20 +27,25 @@ export default function AdminLottery() {
   const [lotteries, setLotteries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [sort, setSort] = useState({ field: "createdAt", direction: "desc" });
 
   /* ------------------------------------------------------------
-   * Fetch Lotteries (Auto + Manual)
+   * Fetch Lotteries (Auto + Manual) WITH DESCENDING ORDER
    * ------------------------------------------------------------ */
   const fetchLotteries = useCallback(async () => {
     try {
       setLoading(true);
-      const ok = await isAdmin();
+      const ok = await checkAdminStatus();
       if (!ok) {
         navigate("/unauthorized");
         return;
       }
 
-      const snapshot = await getDocs(collection(db, "lotteries"));
+      // ✅ FIXED: Query with descending order by createdAt
+      const q = query(collection(db, "lotteries"), orderBy("createdAt", "desc"));
+      const snapshot = await getDocs(q);
 
       const lotteriesData = await Promise.all(
         snapshot.docs.map(async (docSnap) => {
@@ -82,10 +93,14 @@ export default function AdminLottery() {
         })
       );
 
-      // Sort auto-created first
-      setLotteries(
-        lotteriesData.sort((a, b) => (a.isAutoCreated === b.isAutoCreated ? 0 : a.isAutoCreated ? -1 : 1))
-      );
+      // ✅ ENSURE descending order by createdAt (most recent first)
+      const sortedLotteries = lotteriesData.sort((a, b) => {
+        const aTime = new Date(a.createdAt?.seconds * 1000 || a.createdAt || 0);
+        const bTime = new Date(b.createdAt?.seconds * 1000 || b.createdAt || 0);
+        return bTime - aTime; // Descending order
+      });
+
+      setLotteries(sortedLotteries);
     } catch (error) {
       console.error("Error fetching lotteries:", error);
       toast.error("Failed to load lotteries.");
@@ -97,6 +112,113 @@ export default function AdminLottery() {
   useEffect(() => {
     fetchLotteries();
   }, [fetchLotteries]);
+
+  /* ------------------------------------------------------------
+   * Filtering & Sorting with ENSURED DESCENDING ORDER
+   * ------------------------------------------------------------ */
+  const filteredLotteries = useMemo(() => {
+    let result = lotteries;
+    
+    // Apply search filter
+    if (search.trim()) {
+      const s = search.toLowerCase();
+      result = result.filter(l =>
+        l.title?.toLowerCase().includes(s) ||
+        l.itemTitle?.toLowerCase().includes(s) ||
+        (l.isAutoCreated ? "auto" : "manual").includes(s)
+      );
+    }
+    
+    // Apply status filter
+    if (filter !== "all") {
+      switch (filter) {
+        case "auto":
+          result = result.filter(l => l.isAutoCreated);
+          break;
+        case "manual":
+          result = result.filter(l => !l.isAutoCreated);
+          break;
+        case "open":
+          result = result.filter(l => l.status === "open");
+          break;
+        case "drawn":
+          result = result.filter(l => l.status === "drawn");
+          break;
+        case "closed":
+          result = result.filter(l => l.status === "closed");
+          break;
+        default:
+          break;
+      }
+    }
+    
+    // Apply sorting
+    if (sort.field) {
+      result = [...result].sort((a, b) => {
+        const dir = sort.direction === "asc" ? 1 : -1;
+        if (sort.field === "createdAt") {
+          const aDate = new Date(a.createdAt?.seconds * 1000 || a.createdAt || 0);
+          const bDate = new Date(b.createdAt?.seconds * 1000 || b.createdAt || 0);
+          return (aDate - bDate) * dir;
+        }
+        if (sort.field === "closesAt") {
+          const aDate = new Date(a.closesAt?.seconds * 1000 || a.closesAt || 0);
+          const bDate = new Date(b.closesAt?.seconds * 1000 || b.closesAt || 0);
+          return (aDate - bDate) * dir;
+        }
+        if (sort.field === "ticketCount") {
+          const aTickets = a.ticketCount || 0;
+          const bTickets = b.ticketCount || 0;
+          return (aTickets - bTickets) * dir;
+        }
+        if (sort.field === "title") {
+          const aTitle = (a.title || "").toLowerCase();
+          const bTitle = (b.title || "").toLowerCase();
+          return aTitle.localeCompare(bTitle) * dir;
+        }
+        return 0;
+      });
+    } else {
+      // ✅ DEFAULT: Ensure descending order by createdAt (most recent first)
+      result = [...result].sort((a, b) => {
+        const aDate = new Date(a.createdAt?.seconds * 1000 || a.createdAt || 0);
+        const bDate = new Date(b.createdAt?.seconds * 1000 || b.createdAt || 0);
+        return bDate - aDate; // Descending order
+      });
+    }
+
+    return result;
+  }, [lotteries, search, filter, sort]);
+
+  const toggleSort = (field) => {
+    setSort((prev) => {
+      if (prev.field !== field) return { field, direction: "asc" };
+      if (prev.direction === "asc") return { field, direction: "desc" };
+      return { field: null, direction: null };
+    });
+  };
+
+  const renderSortIcon = (field) => {
+    if (sort.field !== field) return <ArrowUpDown size={14} className="inline text-gray-400" />;
+    return sort.direction === "asc" ? (
+      <ArrowUp size={14} className="inline text-blue-600" />
+    ) : (
+      <ArrowDown size={14} className="inline text-blue-600" />
+    );
+  };
+
+  /* ------------------------------------------------------------
+   * Statistics
+   * ------------------------------------------------------------ */
+  const stats = useMemo(() => {
+    const total = lotteries.length;
+    const auto = lotteries.filter(l => l.isAutoCreated).length;
+    const manual = lotteries.filter(l => !l.isAutoCreated).length;
+    const open = lotteries.filter(l => l.status === "open").length;
+    const drawn = lotteries.filter(l => l.status === "drawn").length;
+    
+    return { total, auto, manual, open, drawn };
+  }, [lotteries]);
 
   /* ------------------------------------------------------------
    * Helpers
@@ -122,8 +244,27 @@ export default function AdminLottery() {
     return new Date(timestamp).toLocaleString("ja-JP");
   };
 
-  const autoLotteries = lotteries.filter((l) => l.isAutoCreated);
-  const manualLotteries = lotteries.filter((l) => !l.isAutoCreated);
+  const formatTimeAgo = (v) => {
+    if (!v) return "—";
+    const d = v?.seconds ? new Date(v.seconds * 1000) : new Date(v);
+    
+    if (isNaN(d.getTime())) return "—";
+    
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return formatDate(v);
+  };
+
+  const autoLotteries = filteredLotteries.filter((l) => l.isAutoCreated);
+  const manualLotteries = filteredLotteries.filter((l) => !l.isAutoCreated);
 
   /* ------------------------------------------------------------
    * UI
@@ -201,14 +342,80 @@ export default function AdminLottery() {
           </button>
         </header>
 
+        {/* Statistics */}
+        <section className="p-4 bg-white border-b">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 max-w-6xl mx-auto">
+            <div className="bg-blue-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-blue-700 font-medium">Total</p>
+              <p className="text-2xl font-bold text-blue-800">{stats.total}</p>
+            </div>
+            <div className="bg-green-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-green-700 font-medium">Auto</p>
+              <p className="text-2xl font-bold text-green-800">{stats.auto}</p>
+            </div>
+            <div className="bg-purple-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-purple-700 font-medium">Manual</p>
+              <p className="text-2xl font-bold text-purple-800">{stats.manual}</p>
+            </div>
+            <div className="bg-yellow-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-yellow-700 font-medium">Open</p>
+              <p className="text-2xl font-bold text-yellow-800">{stats.open}</p>
+            </div>
+            <div className="bg-indigo-50 p-4 rounded-lg text-center">
+              <p className="text-sm text-indigo-700 font-medium">Drawn</p>
+              <p className="text-2xl font-bold text-indigo-800">{stats.drawn}</p>
+            </div>
+          </div>
+        </section>
+
         {/* Body */}
         <section className="p-8">
           <div className="bg-white shadow-md border border-gray-200 rounded-lg p-6">
-            <h1 className="text-2xl font-bold mb-6">🎰 Lottery Management</h1>
+            <div className="flex flex-wrap justify-between items-center mb-6 gap-3">
+              <h1 className="text-2xl font-bold flex items-center gap-2">
+                <Ticket size={24} />
+                Lottery Management
+              </h1>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative">
+                  <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search lotteries..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pl-9 pr-3 py-2 border rounded-full text-sm focus:ring-2 focus:ring-indigo-500 w-64"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Filter size={16} className="text-gray-500" />
+                  <select
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                    className="border rounded-md px-3 py-2 text-sm"
+                  >
+                    <option value="all">All Lotteries</option>
+                    <option value="auto">Auto Created</option>
+                    <option value="manual">Manual</option>
+                    <option value="open">Open</option>
+                    <option value="drawn">Drawn</option>
+                    <option value="closed">Closed</option>
+                  </select>
+                </div>
+              </div>
+            </div>
 
             {loading ? (
               <div className="text-center text-gray-500 py-10">
-                Loading lotteries…
+                <Loader2 size={24} className="animate-spin mx-auto mb-2" />
+                <p>Loading lotteries...</p>
+              </div>
+            ) : filteredLotteries.length === 0 ? (
+              <div className="text-center text-gray-500 py-8">
+                <Calendar size={48} className="mx-auto mb-2 text-gray-300" />
+                <p>No lotteries found</p>
               </div>
             ) : (
               <>
@@ -235,7 +442,12 @@ export default function AdminLottery() {
                             <th className="px-4 py-3">Requests</th>
                             <th className="px-4 py-3">Tickets</th>
                             <th className="px-4 py-3">Winners</th>
-                            <th className="px-4 py-3">Closes At</th>
+                            <th className="px-4 py-3">
+                              <div className="flex items-center gap-1 cursor-pointer" onClick={() => toggleSort("closesAt")}>
+                                <Clock size={14} />
+                                Closes At {renderSortIcon("closesAt")}
+                              </div>
+                            </th>
                           </tr>
                         </thead>
                         <tbody>
@@ -260,6 +472,9 @@ export default function AdminLottery() {
                                   <div className="text-xs text-gray-500">
                                     {lottery.title}
                                   </div>
+                                  <div className="text-xs text-gray-400 mt-1">
+                                    Created: {formatTimeAgo(lottery.createdAt)}
+                                  </div>
                                 </div>
                               </td>
                               <td className="px-4 py-3">
@@ -275,15 +490,17 @@ export default function AdminLottery() {
                                 {lottery.requestCount}
                               </td>
                               <td className="px-4 py-3 text-gray-700">
-                                {lottery.ticketCount || 0}
+                                <div className="flex items-center gap-1">
+                                  <Ticket size={14} className="text-gray-400" />
+                                  {lottery.ticketCount || 0}
+                                </div>
                               </td>
                               <td className="px-4 py-3 text-gray-700">
                                 {lottery.winnerDetails.length > 0 ? (
-                                  lottery.winnerDetails.map((w, i) => (
-                                    <div key={i} className="text-xs">
-                                      {w.displayName || w.uid}
-                                    </div>
-                                  ))
+                                  <div className="flex items-center gap-1">
+                                    <Crown size={14} className="text-yellow-500" />
+                                    {lottery.winnerDetails.length} winner(s)
+                                  </div>
                                 ) : (
                                   <span className="italic text-gray-500">
                                     Not drawn
@@ -291,7 +508,10 @@ export default function AdminLottery() {
                                 )}
                               </td>
                               <td className="px-4 py-3 text-gray-600">
-                                {formatDate(lottery.closesAt)}
+                                <div className="flex flex-col">
+                                  <span className="text-sm">{formatDate(lottery.closesAt)}</span>
+                                  <span className="text-xs text-gray-400">{formatTimeAgo(lottery.closesAt)}</span>
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -324,6 +544,12 @@ export default function AdminLottery() {
                             <th className="px-4 py-3">Tickets</th>
                             <th className="px-4 py-3">Winners</th>
                             <th className="px-4 py-3">Linked Item</th>
+                            <th className="px-4 py-3">
+                              <div className="flex items-center gap-1 cursor-pointer" onClick={() => toggleSort("createdAt")}>
+                                <Clock size={14} />
+                                Created {renderSortIcon("createdAt")}
+                              </div>
+                            </th>
                           </tr>
                         </thead>
                         <tbody>
@@ -345,18 +571,28 @@ export default function AdminLottery() {
                                 </span>
                               </td>
                               <td className="px-4 py-3 text-gray-700">
-                                {lottery.ticketCount || 0}
+                                <div className="flex items-center gap-1">
+                                  <Ticket size={14} className="text-gray-400" />
+                                  {lottery.ticketCount || 0}
+                                </div>
                               </td>
                               <td className="px-4 py-3 text-gray-700">
-                                {lottery.winners
-                                  ? lottery.winners.length
-                                  : 0}{" "}
-                                / {lottery.maxWinners || "—"}
+                                <div className="flex items-center gap-1">
+                                  <Crown size={14} className="text-yellow-500" />
+                                  {lottery.winners ? lottery.winners.length : 0}{" "}
+                                  / {lottery.maxWinners || "—"}
+                                </div>
                               </td>
                               <td className="px-4 py-3 text-gray-700">
                                 {lottery.hasItem
                                   ? lottery.itemTitle
                                   : "No item linked"}
+                              </td>
+                              <td className="px-4 py-3 text-gray-600">
+                                <div className="flex flex-col">
+                                  <span className="text-sm">{formatDate(lottery.createdAt)}</span>
+                                  <span className="text-xs text-gray-400">{formatTimeAgo(lottery.createdAt)}</span>
+                                </div>
                               </td>
                             </tr>
                           ))}

@@ -1,23 +1,22 @@
-// src/routes/PrivateRouteAdmin.js
-import { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+// ✅ FILE: src/routes/PrivateRouteAdmin.js (FIXED)
+import { Navigate, useLocation } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 
 const PrivateRouteAdmin = ({ children }) => {
-  const { isAdmin } = useAuth();
-  const [adminStatus, setAdminStatus] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const { currentUser, loadingAuth, isAdmin } = useAuth();
+  const location = useLocation();
 
-  useEffect(() => {
-    const checkAdmin = async () => {
-      setAdminStatus(await isAdmin());
-      setLoading(false);
-    };
-    checkAdmin();
-  }, [isAdmin]);
+  if (loadingAuth) return <div className="p-6 text-center">Checking admin access...</div>;
 
-  if (loading) return <div>Loading permissions...</div>;
-  return adminStatus ? children : <Navigate to="/unauthorized" />;
+  if (!currentUser) {
+    return <Navigate to="/admin-login" state={{ from: location }} replace />;
+  }
+
+  if (!isAdmin) {
+    return <Navigate to="/unauthorized" replace />;
+  }
+
+  return children;
 };
 
 export default PrivateRouteAdmin;

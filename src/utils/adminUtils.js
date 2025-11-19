@@ -1,19 +1,26 @@
 // ✅ FILE: src/utils/adminUtils.js
+// NOTE: Renamed old checkAdminStatus() to checkAdminStatus()
+//       to avoid collision with AuthContext.isAdmin (boolean)
+
 import { getAuth } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
 /**
- * Low-level probe that inspects multiple admin signals and explains the result.
- * NOTE: Backend authorization currently relies on Firestore: /admins/{uid}.
- * Custom claims or hardcoded email are informational only here.
+ * Low-level probe that inspects multiple admin signals.
  */
 export const getAdminDetails = async () => {
   const auth = getAuth();
   const user = auth.currentUser;
 
   if (!user) {
-    return { isAdminDoc: false, reason: "No user signed in", uid: null, email: null, checks: {} };
+    return {
+      isAdminDoc: false,
+      reason: "No user signed in",
+      uid: null,
+      email: null,
+      checks: {},
+    };
   }
 
   const uid = user.uid;
@@ -24,15 +31,15 @@ export const getAdminDetails = async () => {
     hardcodedEmailMatch: false,
   };
 
-  // 1) Custom claims (informational)
+  // 1) Custom claims
   try {
-    const token = await user.getIdTokenResult(true); // force refresh to get latest claims
+    const token = await user.getIdTokenResult(true);
     checks.hasCustomClaim = !!token?.claims?.admin;
   } catch (e) {
     console.warn("[adminUtils] Failed to read custom claims:", e);
   }
 
-  // 2) Firestore admins/{uid} (this is what the backend enforces)
+  // 2) Firestore admins/{uid}
   try {
     const adminDoc = await getDoc(doc(db, "admins", uid));
     checks.hasAdminsDoc = adminDoc.exists();
@@ -40,58 +47,57 @@ export const getAdminDetails = async () => {
     console.warn("[adminUtils] Failed to read admins/{uid}:", e);
   }
 
-  // 3) Hardcoded email (informational only; NOT used for gating)
+  // 3) Hardcoded email
   checks.hardcodedEmailMatch = email === "gnetstelecom@gmail.com" && !!user.emailVerified;
 
-  // We report isAdminDoc (backend-aligned) separately from other signals
   return {
-    isAdminDoc: checks.hasAdminsDoc, // ✅ this mirrors the backend check
+    isAdminDoc: checks.hasAdminsDoc,
     reason: checks.hasAdminsDoc
       ? "Admin via Firestore: document exists at admins/{uid}"
-      : "Not admin: no admins/{uid} doc (custom claim/email are informational only)",
+      : "Not admin: no admins/{uid} doc",
     uid,
     email,
-    checks, // { hasCustomClaim, hasAdminsDoc, hardcodedEmailMatch }
+    checks,
   };
 };
 
 /**
- * ✅ Returns true ONLY if Firestore has /admins/{uid}.
- * This matches the backend's authorization check to avoid mismatches.
+ * ⚠️ Renamed old checkAdminStatus() to avoid conflict with AuthContext.isAdmin
+ * Use this ONLY for debugging or external checks.
  */
-export const isAdmin = async () => {
+export const checkAdminStatus = async () => {
   const details = await getAdminDetails();
   return !!details.isAdminDoc;
 };
 
 /**
- * Helper for pages/routes where you want a clean exception on fail.
- * Use this inside loaders or action handlers.
+ * Throws if no admin doc exists.
  */
 export const ensureAdminOrThrow = async () => {
-  const ok = await isAdmin();
+  const ok = await checkAdminStatus();
   if (!ok) {
-    const { uid, email } = getAuth();
-    const msg = `Admin access denied. Create /admins/{uid} in Firestore for this account.`;
+    const { currentUser } = getAuth();
+    const msg =
+      `Admin access denied. Create /admins/{uid} in Firestore for this account.`;
     const err = new Error(msg);
-    // Helpful context for logs
     err.name = "AdminGuardError";
-    err.uid = uid || null;
-    err.email = email || null;
+    err.uid = currentUser?.uid ?? null;
+    err.email = currentUser?.email ?? null;
     throw err;
   }
 };
 
 /**
- * Pretty console output for quick diagnosis in the browser.
- * Call this from anywhere:
- *   await debugWhyNotAdmin();
+ * Pretty console output for debugging admin issues.
  */
 export const debugWhyNotAdmin = async () => {
   const auth = getAuth();
   const user = auth.currentUser;
 
-  console.groupCollapsed("%c[Admin Debug] who am I?", "color:#0b82ff;font-weight:bold");
+  console.groupCollapsed(
+    "%c[Admin Debug] who am I?",
+    "color:#0b82ff;font-weight:bold"
+  );
   if (!user) {
     console.log("No user signed in");
     console.groupEnd();
@@ -103,7 +109,7 @@ export const debugWhyNotAdmin = async () => {
   console.log("Email verified:", user.emailVerified);
 
   const details = await getAdminDetails();
-  console.log("Backend-aligned isAdmin (admins/{uid}):", details.isAdminDoc);
+  console.log("Backend-aligned isAdminDoc:", details.isAdminDoc);
   console.log("reason:", details.reason);
   console.table(details.checks);
 
@@ -111,7 +117,7 @@ export const debugWhyNotAdmin = async () => {
     console.log(
       "%cTip:",
       "color:#ff9800",
-      "To grant admin quickly, create an empty doc at admins/{uid} in Firestore (use the UID shown above)."
+      "Create an empty doc at admins/{uid} in Firestore."
     );
   }
   console.groupEnd();

@@ -1,7 +1,9 @@
 // ✅ FILE: src/pages/AdminPaymentDetails.js (Contrast + shadow enhanced)
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { isAdmin } from "../utils/adminUtils";
+import { checkAdminStatus } from "../utils/adminUtils";
+
+
 import toast from "react-hot-toast";
 import {
   getPaymentDetails as httpGetPaymentDetails,
@@ -147,7 +149,7 @@ export default function AdminPaymentDetails() {
 
   useEffect(() => {
     (async () => {
-      const ok = await isAdmin();
+      const ok = await checkAdminStatus();
       if (!ok) return navigate("/unauthorized");
       try {
         setLoading(true);

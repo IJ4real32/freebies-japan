@@ -1,12 +1,10 @@
-// ✅ FILE: src/pages/AdminDonate.js
+// ✅ FILE: src/pages/AdminDonate.js (FINAL — Mobile-First + AdminLayout UI + Responsive)
 import React, { useMemo, useState, useEffect } from "react";
 import {
   addDoc,
   collection,
   serverTimestamp,
   Timestamp,
-  doc,
-  getDoc
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase";
@@ -14,14 +12,26 @@ import { useAuth } from "../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { v4 as uuidv4 } from "uuid";
+import AdminLayout from "../components/Admin/AdminLayout"; // ⭐ NEW — unified admin wrapper
 
+/* ------------------------------------------------------
+ * CONSTANTS
+ * ------------------------------------------------------ */
 const CATEGORIES = [
-  { value: "", labelKey: "itemCategory" },
+  { value: "", label: "Select Category" },
   { value: "furniture", label: "Furniture" },
   { value: "electronics", label: "Electronics" },
   { value: "clothing", label: "Clothing" },
   { value: "books", label: "Books" },
+  { value: "home", label: "Home Goods" },
   { value: "other", label: "Other" },
+];
+
+const SIZES = [
+  { value: "small", label: "Small (e.g., books, clothing)" },
+  { value: "medium", label: "Medium (e.g., small electronics)" },
+  { value: "large", label: "Large (e.g., furniture, appliances)" },
+  { value: "x-large", label: "Extra Large (e.g., sofa, refrigerator)" },
 ];
 
 const DELIVERY_OPTIONS = [
@@ -30,13 +40,24 @@ const DELIVERY_OPTIONS = [
   { value: "both", label: "Pickup or Delivery" },
 ];
 
+// Debug helper
+const debugAdminStatus = (user) => {
+  console.log("🔍 ADMIN STATUS DEBUG:", {
+    email: user?.email,
+    uid: user?.uid,
+    isGnetstelecom: user?.email?.includes("gnetstelecom"),
+    emailVerified: user?.emailVerified,
+  });
+};
+
+/* ------------------------------------------------------
+ * COMPONENT
+ * ------------------------------------------------------ */
 export default function AdminDonate() {
-  const { currentUser } = useAuth();
+  const { currentUser, isAdmin } = useAuth();
   const navigate = useNavigate();
 
-  const [isAdmin, setIsAdmin] = useState(false);
   const [loadingAdminCheck, setLoadingAdminCheck] = useState(true);
-
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -46,9 +67,11 @@ export default function AdminDonate() {
     type: "free",
     price: "",
     pickupLocation: "",
-    // Admin-specific fields
     sponsoredBy: "Freebies Japan",
     durationHours: 72,
+    size: "medium",
+    deliveryMin: "",
+    deliveryMax: "",
   });
 
   const [images, setImages] = useState([]);
@@ -58,61 +81,58 @@ export default function AdminDonate() {
 
   const isPremium = form.type === "premium";
 
-  // Check admin status
+  /* ------------------------------------------------------
+   * ADMIN CHECK
+   * ------------------------------------------------------ */
   useEffect(() => {
-    const checkAdminStatus = async () => {
-      if (!currentUser) {
-        setLoadingAdminCheck(false);
-        return;
-      }
-      
-      try {
-        const adminDoc = await getDoc(doc(db, "admins", currentUser.uid));
-        if (adminDoc.exists()) {
-          setIsAdmin(true);
-        } else {
-          toast.error("Admin access required");
-          navigate("/");
-        }
-      } catch (error) {
-        console.error("Error checking admin status:", error);
-        toast.error("Error verifying admin access");
-        navigate("/");
-      } finally {
-        setLoadingAdminCheck(false);
-      }
-    };
+    if (!currentUser) {
+      setLoadingAdminCheck(false);
+      return;
+    }
 
-    checkAdminStatus();
-  }, [currentUser, navigate]);
+    debugAdminStatus(currentUser);
 
+    if (!isAdmin) {
+      toast.error("Admin access required");
+      navigate("/");
+      return;
+    }
+
+    setLoadingAdminCheck(false);
+  }, [currentUser, isAdmin, navigate]);
+
+  /* ------------------------------------------------------
+   * VALIDATION
+   * ------------------------------------------------------ */
   const canSubmit = useMemo(() => {
     if (!form.title.trim() || !form.description.trim() || !form.category)
       return false;
-    
+
     if (form.title.trim().length > 100 || form.description.trim().length > 1000)
       return false;
-    
+
     if (!form.pickupLocation.trim()) return false;
-    
+
     if (isPremium) {
       const n = Number(form.price);
       if (!Number.isFinite(n) || n < 100) return false;
     }
-    
+
     if (images.length < 1 || images.length > 10) return false;
-    
+
+    if (form.delivery !== "pickup") {
+      const min = Number(form.deliveryMin);
+      const max = Number(form.deliveryMax);
+      if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < min)
+        return false;
+    }
+
     return true;
   }, [form, images, isPremium]);
 
-  /* ------------------------- Input Handlers -------------------------- */
-  const sanitizeText = (val = "") => {
-    return val
-      .replace(/[^a-zA-Z0-9\s.,!()&'":;/-]/g, "")
-      .replace(/\s{2,}/g, " ")
-      .replace(/\b\w/g, (char) => char.toUpperCase());
-  };
-
+  /* ------------------------------------------------------
+   * INPUT HANDLERS
+   * ------------------------------------------------------ */
   const onChange = (e) => {
     const { name, value, type } = e.target;
 
@@ -122,83 +142,67 @@ export default function AdminDonate() {
     }
 
     let newValue = value;
-    if (name === "price") {
+    if (["price", "deliveryMin", "deliveryMax"].includes(name)) {
       newValue = value.replace(/[^\d]/g, "");
-    } else {
-      newValue = sanitizeText(value);
     }
 
     setForm((f) => ({ ...f, [name]: newValue }));
   };
 
-  /* ------------------------- File Upload -------------------------- */
   const onFiles = (e) => {
     const files = Array.from(e.target.files || []);
     const valid = files.filter(
       (f) => f.type.startsWith("image/") && f.size <= 5 * 1024 * 1024
     );
-    
+
     if (valid.length < files.length) {
-      setErrorMsg("Some files were invalid or exceeded 5 MB.");
+      setErrorMsg("Some files were invalid or exceeded 5MB.");
     }
-    
-    const newImages = [...images, ...valid].slice(0, 10); // Admin can upload up to 10 images
+
+    const newImages = [...images, ...valid].slice(0, 10);
     setImages(newImages);
-    
+
     if (newImages.length >= 1 && errorMsg.includes("image")) {
       setErrorMsg("");
     }
   };
 
-  const removeImage = (idx) => {
+  const removeImage = (idx) =>
     setImages((arr) => arr.filter((_, i) => i !== idx));
-  };
 
+  /* ------------------------------------------------------
+   * UPLOAD
+   * ------------------------------------------------------ */
   const uploadAll = async (donationId) => {
-    console.log("🖼️ Starting upload of", images.length, "images...");
     const urls = [];
-    
-    for (const [index, file] of images.entries()) {
-      try {
-        const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-        const filename = `${Date.now()}-${uuidv4()}.${ext}`;
-        const path = `donations/${donationId}/${filename}`;
-        const storageRef = ref(storage, path);
-        
-        await uploadBytes(storageRef, file, { contentType: file.type });
-        const downloadURL = await getDownloadURL(storageRef);
-        urls.push(downloadURL);
-      } catch (error) {
-        console.error(`❌ Failed to upload image ${index + 1}:`, error);
-        throw new Error(`Failed to upload image: ${file.name}`);
-      }
+
+    for (const file of images) {
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const filename = `${Date.now()}-${uuidv4()}.${ext}`;
+      const path = `donations/${donationId}/${filename}`;
+      const storageRef = ref(storage, path);
+
+      await uploadBytes(storageRef, file, { contentType: file.type });
+      const downloadURL = await getDownloadURL(storageRef);
+      urls.push(downloadURL);
     }
-    
-    console.log("🎉 All images uploaded. URLs:", urls);
     return urls;
   };
 
-  /* ------------------------- Submit (Admin Version) -------------------------- */
+  /* ------------------------------------------------------
+   * SUBMIT HANDLER
+   * ------------------------------------------------------ */
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (submitting || !isAdmin) return;
+    if (!isAdmin || submitting) return;
 
     if (!currentUser) {
-      setErrorMsg("Please log in to continue.");
+      setErrorMsg("Please log in.");
       return;
     }
+
     if (!canSubmit) {
-      if (images.length < 1) {
-        setErrorMsg("Please upload at least 1 image.");
-      } else if (images.length > 10) {
-        setErrorMsg("Maximum 10 images allowed.");
-      } else if (form.title.trim().length > 100) {
-        setErrorMsg("Title must be 100 characters or less.");
-      } else if (form.description.trim().length > 1000) {
-        setErrorMsg("Description must be 1000 characters or less.");
-      } else {
-        setErrorMsg("Please complete all required fields.");
-      }
+      setErrorMsg("Please complete all required fields.");
       return;
     }
 
@@ -207,250 +211,239 @@ export default function AdminDonate() {
     setSuccessMsg("");
 
     try {
-      // 1. Generate donation ID for image organization
       const donationId = uuidv4();
-      
-      // 2. Upload all images first
       const imageUrls = await uploadAll(donationId);
-      
-      // 3. Verify we have at least 1 image
-      if (imageUrls.length < 1) {
-        throw new Error("At least 1 image is required");
-      }
 
-      // 4. Prepare ADMIN donation data
-      const priceNumber = isPremium && form.price ? Number(form.price) : null;
-      const requestWindowEnd = Timestamp.fromDate(
+      const priceNumber = isPremium ? Number(form.price) : null;
+      const expiry = Timestamp.fromDate(
         new Date(Date.now() + Number(form.durationHours) * 60 * 60 * 1000)
       );
 
       const donationData = {
-        // Admin identification
+        donorType: "admin",
+        sponsoredBy: "admin", // 🔥 Firestore rule requirement
         donorId: currentUser.uid,
         donorEmail: currentUser.email,
-        donorType: "admin",
-        sponsoredBy: form.sponsoredBy,
-        
-        // Auto-verified and approved for admin donations
-        verified: true,
-        approved: true,
-        
-        // Content (from form)
+
         title: form.title.trim(),
         description: form.description.trim(),
         category: form.category,
         condition: form.condition,
         delivery: form.delivery,
         pickupLocation: form.pickupLocation.trim(),
-        
-        // Listing type
+
+        size: form.size,
+        estimatedDelivery:
+          form.delivery !== "pickup"
+            ? {
+                min: Number(form.deliveryMin),
+                max: Number(form.deliveryMax),
+              }
+            : null,
+
+        pickupAddress: {
+          addressLine1: form.pickupLocation.trim(),
+          city: "Tokyo",
+          prefecture: "Tokyo",
+          postalCode: "150-0001",
+        },
+
         type: form.type,
-        isPremium: isPremium,
+        isPremium,
         price: priceNumber,
         currency: "JPY",
-        
-        // Status - starts as active and verified
-        status: "active",
-        
-        // Images
+
+        status: "sponsored",
+        isSponsored: true,
+        featured: true,
+
         images: imageUrls,
-        
-        // Timestamps
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        
-        // Admin-specific fields
+
         durationHours: Number(form.durationHours),
-        expiryAt: requestWindowEnd,
-        requestWindowEnd: requestWindowEnd,
+        expiryAt: expiry,
+        requestWindowEnd: expiry,
         availabilityCycle: 1,
+
+        verified: true,
+        approved: true,
       };
 
-      console.log("📦 Final ADMIN donation data:", donationData);
-
-      // 5. Single write to Firestore
       await addDoc(collection(db, "donations"), donationData);
 
-      toast.success("🎉 Admin donation submitted successfully!");
-      setSuccessMsg("Sponsored item created successfully ✅");
+      toast.success("🎉 Sponsored item created successfully!");
+      setSuccessMsg("Sponsored item created successfully.");
 
-      setTimeout(() => navigate("/admin-dashboard"), 1200);
-      
+      setTimeout(() => navigate("/admin"), 1200);
     } catch (err) {
-      console.error("❌ Submission error:", err);
-      setErrorMsg(err?.message || "Donation failed. Please try again.");
+      console.error("❌ Submit error:", err);
+
+      if (err.code === "permission-denied") {
+        setErrorMsg(
+          "❌ Admin permissions required. Please ensure you're logged in as an administrator."
+        );
+        toast.error("Admin permissions required");
+      } else {
+        setErrorMsg(err?.message || "Error creating sponsored item.");
+        toast.error("Failed to create sponsored item");
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
+  /* ------------------------------------------------------
+   * LOADING / DENIED
+   * ------------------------------------------------------ */
   if (loadingAdminCheck) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Checking admin access...</p>
+      <AdminLayout title="Create Sponsored Item">
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-purple-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Checking admin access...</p>
+          </div>
         </div>
-      </div>
+      </AdminLayout>
     );
   }
 
   if (!isAdmin) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-red-600">Access Denied</h1>
-          <p className="mt-2 text-gray-600">Admin privileges required.</p>
+      <AdminLayout title="Access Denied">
+        <div className="p-6 text-center text-red-600 font-semibold">
+          Admin privileges required.
         </div>
-      </div>
+      </AdminLayout>
     );
   }
 
-  /* ------------------------- UI -------------------------- */
+  /* ------------------------------------------------------
+   * MAIN UI (Mobile-First + Responsive)
+   * ------------------------------------------------------ */
   return (
-    <div className="min-h-screen bg-gray-50 w-full overflow-x-hidden">
-      <main className="max-w-3xl mx-auto px-4 py-8 sm:py-10">
-        <div className="mb-6">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">
-            Create Sponsored Donation
-          </h1>
-          <p className="text-sm text-gray-600 mt-2">
-            Create a verified sponsored item as Freebies Japan
-          </p>
-        </div>
-
+    <AdminLayout title="Create Sponsored Item">
+      <div className="w-full max-w-3xl mx-auto px-4 pb-32 md:pb-40">
+        {/* Status Messages */}
         {successMsg && (
-          <div className="bg-green-50 border border-green-300 text-green-800 rounded-xl p-4 mb-6">
+          <div className="bg-green-50 border border-green-300 text-green-800 rounded-lg p-4 mb-4 text-sm">
             {successMsg}
           </div>
         )}
         {errorMsg && (
-          <div className="bg-red-50 border border-red-300 text-red-800 rounded-xl p-4 mb-6">
+          <div className="bg-red-50 border border-red-300 text-red-800 rounded-lg p-4 mb-4 text-sm">
             {errorMsg}
           </div>
         )}
 
-        <form
-          onSubmit={handleSubmit}
-          className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6 text-gray-700"
-        >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Left Section */}
-            <div className="space-y-4">
-              {/* Title */}
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* ----------------------------------------------
+           * SECTION: BASIC INFORMATION
+           * ---------------------------------------------- */}
+          <section className="bg-white rounded-lg shadow-sm border p-3 md:p-4">
+            <h2 className="text-lg md:text-xl font-semibold mb-4 text-gray-800">
+              Basic Information
+            </h2>
+
+            <div className="space-y-6">
               <div>
-                <label className="block font-medium mb-1">
-                  Title *
-                </label>
+                <label className="block text-sm font-medium mb-2">Title *</label>
                 <input
                   name="title"
                   value={form.title}
                   onChange={onChange}
                   required
                   maxLength={100}
-                  placeholder="e.g., Premium Electronics Bundle"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="e.g., High Quality Furniture Set"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-3 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
                 />
                 <div className="text-xs text-gray-500 mt-1 text-right">
-                  {form.title.length}/100 characters
+                  {form.title.length}/100
                 </div>
               </div>
 
-              {/* Description */}
               <div>
-                <label className="block font-medium mb-1">
+                <label className="block text-sm font-medium mb-2">
                   Description *
                 </label>
                 <textarea
                   name="description"
                   value={form.description}
+                  rows={4}
                   onChange={onChange}
                   required
                   maxLength={1000}
-                  rows={5}
-                  placeholder="Describe this sponsored item in detail..."
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="Describe this sponsored item..."
+                  className="w-full border border-gray-300 rounded-lg px-3 py-3 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
                 />
                 <div className="text-xs text-gray-500 mt-1 text-right">
-                  {form.description.length}/1000 characters
+                  {form.description.length}/1000
                 </div>
               </div>
 
-              {/* Images - Admin can upload 1-10 images */}
-              <div>
-                <label className="block font-medium mb-1">
-                  Images (1–10) *
-                </label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={onFiles}
-                  className="w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                />
-                <div className="text-xs text-gray-500 mt-1">
-                  Select 1 to 10 images. Each file must be under 5MB.
+              {/* Mobile-first → 1 col, Tablet → 2 col */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Category *
+                  </label>
+                  <select
+                    name="category"
+                    value={form.category}
+                    onChange={onChange}
+                    required
+                    className="w-full border border-gray-300 rounded-lg px-3 py-3 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                  >
+                    {CATEGORIES.map((c) => (
+                      <option key={c.value} value={c.value}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <div className="flex flex-wrap gap-3 mt-3">
-                  {images.map((img, idx) => (
-                    <div key={idx} className="relative group">
-                      <img
-                        src={URL.createObjectURL(img)}
-                        alt={`Preview ${idx + 1}`}
-                        className="w-24 h-24 object-cover rounded-lg border"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeImage(idx)}
-                        className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Item Size *
+                  </label>
+                  <select
+                    name="size"
+                    value={form.size}
+                    onChange={onChange}
+                    required
+                    className="w-full border border-gray-300 rounded-lg px-3 py-3 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                  >
+                    {SIZES.map((size) => (
+                      <option key={size.value} value={size.value}>
+                        {size.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                {images.length > 0 && images.length < 1 && (
-                  <p className="text-red-500 text-sm mt-2">
-                    ⚠️ At least 1 image is required
-                  </p>
-                )}
-                {images.length === 10 && (
-                  <p className="text-green-500 text-sm mt-2">
-                    ✓ Maximum images reached (10/10)
-                  </p>
-                )}
               </div>
             </div>
+          </section>
 
-            {/* Right Section */}
+          {/* ----------------------------------------------
+           * SECTION: DELIVERY INFORMATION
+           * ---------------------------------------------- */}
+          <section className="bg-white rounded-lg shadow-sm border p-3 md:p-4">
+            <h2 className="text-lg md:text-xl font-semibold mb-4 text-gray-800">
+              Delivery Information
+            </h2>
+
             <div className="space-y-4">
-              {/* Category */}
               <div>
-                <label className="block font-medium mb-1">Category *</label>
-                <select
-                  name="category"
-                  value={form.category}
-                  onChange={onChange}
-                  required
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
-                >
-                  {CATEGORIES.map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {c.labelKey || c.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Delivery Options */}
-              <div>
-                <label className="block font-medium mb-1">Delivery Options *</label>
+                <label className="block text-sm font-medium mb-2">
+                  Delivery Options *
+                </label>
                 <select
                   name="delivery"
                   value={form.delivery}
                   onChange={onChange}
                   required
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-3 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
                 >
                   {DELIVERY_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -460,44 +453,140 @@ export default function AdminDonate() {
                 </select>
               </div>
 
-              {/* Pickup Location */}
+              {form.delivery !== "pickup" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Delivery Min (¥)
+                    </label>
+                    <input
+                      name="deliveryMin"
+                      type="number"
+                      value={form.deliveryMin}
+                      onChange={onChange}
+                      required={form.delivery !== "pickup"}
+                      placeholder="1000"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-3 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Delivery Max (¥)
+                    </label>
+                    <input
+                      name="deliveryMax"
+                      type="number"
+                      value={form.deliveryMax}
+                      onChange={onChange}
+                      required={form.delivery !== "pickup"}
+                      placeholder="3000"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                    />
+                  </div>
+                </div>
+              )}
+
               <div>
-                <label className="block font-medium mb-1">Pickup Location/Instructions *</label>
+                <label className="block text-sm font-medium mb-2">
+                  Pickup Location *
+                </label>
                 <input
                   name="pickupLocation"
                   value={form.pickupLocation}
                   onChange={onChange}
                   required
-                  placeholder="e.g., Freebies Japan Office - Shibuya, or Delivery instructions"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="e.g., Freebies Japan Office - Shibuya"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-3 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
                 />
               </div>
+            </div>
+          </section>
 
-              {/* Admin Specific Fields */}
-              <div className="border-t pt-4">
-                <label className="block font-medium text-lg mb-3">
-                  🏢 Admin Settings
-                </label>
+          {/* ----------------------------------------------
+           * SECTION: IMAGES
+           * ---------------------------------------------- */}
+          <section className="bg-white rounded-lg shadow-sm border p-4 md:p-6">
+            <h2 className="text-lg md:text-xl font-semibold mb-4 text-gray-800">
+              Images
+            </h2>
 
-                {/* Sponsored By */}
-                <div className="mb-3">
-                  <label className="block text-sm font-medium mb-1">Sponsored By</label>
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                Upload Images (1–10) *
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={onFiles}
+                className="w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 
+                           file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 
+                           hover:file:bg-purple-100"
+              />
+
+              <div className="text-xs text-gray-500 mt-1">
+                Max 10 images — 5MB each.
+              </div>
+
+              {/* Mobile-first → 3 per row, Tablet → 4, Desktop → 6 */}
+              {images.length > 0 && (
+                <div className="mt-4 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
+                  {images.map((img, idx) => (
+                    <div key={idx} className="relative group">
+                      <img
+                        src={URL.createObjectURL(img)}
+                        className="w-full h-24 object-cover rounded-lg border"
+                        alt="preview"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeImage(idx)}
+                        className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full
+                                   w-6 h-6 flex items-center justify-center text-xs opacity-90"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* ----------------------------------------------
+           * SECTION: ADMIN SETTINGS
+           * ---------------------------------------------- */}
+          <section className="bg-white rounded-lg shadow-sm border p-3 md:p-4">
+            <h2 className="text-lg md:text-xl font-semibold mb-4 text-gray-800">
+              Admin Settings
+            </h2>
+
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Sponsored By
+                  </label>
                   <input
                     name="sponsoredBy"
                     value={form.sponsoredBy}
                     onChange={onChange}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
                   />
+                  <div className="text-xs text-gray-500 mt-1">
+                    Display name for users (internally always "admin")
+                  </div>
                 </div>
 
-                {/* Duration */}
-                <div className="mb-3">
-                  <label className="block text-sm font-medium mb-1">Listing Duration</label>
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Listing Duration
+                  </label>
                   <select
                     name="durationHours"
                     value={form.durationHours}
                     onChange={onChange}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
                   >
                     <option value={24}>24 hours</option>
                     <option value={48}>48 hours</option>
@@ -509,83 +598,90 @@ export default function AdminDonate() {
 
               {/* Listing Type */}
               <div>
-                <label className="block font-medium mb-1">Listing Type *</label>
-                <div className="flex flex-col gap-1">
-                  <label className="flex items-center gap-2 text-sm">
+                <label className="block text-sm font-medium mb-2">
+                  Listing Type *
+                </label>
+
+                <div className="space-y-3">
+                  <label className="flex items-center gap-3 text-sm p-3 border rounded-lg cursor-pointer">
                     <input
                       type="radio"
                       name="type"
                       value="free"
                       checked={form.type === "free"}
                       onChange={onChange}
-                      className="accent-indigo-600 focus:ring-indigo-500 w-3 h-3"
+                      className="accent-purple-600"
                     />
                     <span>Free (sponsored donation)</span>
                   </label>
-                  <label className="flex items-center gap-2 text-sm">
+
+                  <label className="flex items-center gap-3 text-sm p-3 border rounded-lg cursor-pointer">
                     <input
                       type="radio"
                       name="type"
                       value="premium"
                       checked={form.type === "premium"}
                       onChange={onChange}
-                      className="accent-indigo-600 focus:ring-indigo-500 w-3 h-3"
+                      className="accent-purple-600"
                     />
                     <span>Premium (sponsored sale)</span>
                   </label>
                 </div>
               </div>
 
-              {/* Price */}
+              {/* Premium Pricing */}
               {isPremium && (
                 <div>
-                  <label className="block font-medium mb-1">Price (JPY) *</label>
+                  <label className="block text-sm font-medium mb-2">
+                    Price (JPY) *
+                  </label>
                   <input
                     name="price"
                     type="number"
-                    min="100"
+                    min={100}
                     value={form.price}
                     onChange={onChange}
                     required
-                    placeholder="e.g., 1500"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    placeholder="1500"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-3 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
                   />
-                  <div className="text-xs text-gray-500 mt-1">
-                    Minimum price: ¥100
-                  </div>
                 </div>
               )}
             </div>
-          </div>
-
-          {/* Submit */}
-          <div className="pt-6 text-right">
-            <button
-              type="submit"
-              disabled={submitting || !canSubmit}
-              className="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-6 py-2 rounded-full focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50 transition-colors duration-200"
-            >
-              {submitting ? (
-                <span className="flex items-center justify-center">
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Creating Sponsored Item...
-                </span>
-              ) : (
-                "Create Sponsored Item"
-              )}
-            </button>
-            
-            {submitting && (
-              <p className="text-sm text-gray-600 mt-2">
-                Uploading {images.length} images... This may take a moment.
-              </p>
-            )}
-          </div>
+          </section>
         </form>
-      </main>
-    </div>
+      </div>
+
+      {/* ------------------------------------------------------
+       * STICKY SAFE-AREA SUBMIT BUTTON
+       * ------------------------------------------------------ */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 
+                      pb-[calc(1rem+env(safe-area-inset-bottom))]">
+        <button
+          form="admin-donate-form"
+          type="submit"
+          disabled={submitting || !canSubmit}
+          onClick={handleSubmit}
+          className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-4 rounded-lg
+                     focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50 
+                     transition-all duration-200"
+        >
+          {submitting ? (
+            <span className="flex items-center justify-center gap-2">
+              <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div>
+              Creating Sponsored Item...
+            </span>
+          ) : (
+            "Create Sponsored Item"
+          )}
+        </button>
+
+        {!canSubmit && !submitting && (
+          <p className="text-xs text-gray-500 mt-2 text-center">
+            Please complete all required fields
+          </p>
+        )}
+      </div>
+    </AdminLayout>
   );
 }

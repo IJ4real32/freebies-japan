@@ -13,7 +13,9 @@ import {
   adminRunLottery,
   adminRelistDonation,
 } from "../services/functionsApi";
-import { isAdmin } from "../utils/adminUtils";
+import { checkAdminStatus } from "../utils/adminUtils";
+
+
 import toast from "react-hot-toast";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -43,7 +45,7 @@ export default function AdminLotteryDashboard() {
   const fetchItems = async () => {
     setLoading(true);
     try {
-      const ok = await isAdmin();
+      const ok = await checkAdminStatus();
       if (!ok) {
         navigate("/unauthorized");
         return;

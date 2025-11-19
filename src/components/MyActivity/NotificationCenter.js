@@ -1,0 +1,89 @@
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { MessageCircle, X, Award, Truck, AlertCircle } from 'lucide-react';
+
+const NotificationCenter = ({ notifications, onClearNotification, onClearAll }) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!notifications.length) return null;
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="relative p-2 text-gray-600 hover:text-blue-600 transition-colors"
+      >
+        <MessageCircle size={20} />
+        {notifications.length > 0 && (
+          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+            {notifications.length}
+          </span>
+        )}
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: -10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: -10 }}
+            className="absolute right-0 top-12 w-80 bg-white rounded-xl shadow-2xl border border-gray-200 z-50"
+          >
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900">Notifications</h3>
+              <button
+                onClick={onClearAll}
+                className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+              >
+                Clear All
+              </button>
+            </div>
+            <div className="max-h-96 overflow-y-auto">
+              {notifications.map((notification, index) => (
+                <motion.div
+                  key={notification.id}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                  className="p-4 border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                      notification.type === 'award' ? 'bg-purple-100 text-purple-600' :
+                      notification.type === 'delivery' ? 'bg-green-100 text-green-600' :
+                      notification.type === 'system' ? 'bg-blue-100 text-blue-600' :
+                      'bg-gray-100 text-gray-600'
+                    }`}>
+                      {notification.type === 'award' && <Award size={16} />}
+                      {notification.type === 'delivery' && <Truck size={16} />}
+                      {notification.type === 'system' && <AlertCircle size={16} />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 mb-1">
+                        {notification.title}
+                      </p>
+                      <p className="text-xs text-gray-600 mb-2">
+                        {notification.message}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        {new Date(notification.timestamp).toLocaleTimeString()}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => onClearNotification(notification.id)}
+                      className="text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+export default NotificationCenter;

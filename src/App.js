@@ -1,4 +1,4 @@
-// ✅ FILE: src/App.js
+// ✅ FILE: src/App.js (FINAL PATCHED)
 import React, { useEffect, useState } from "react";
 import {
   BrowserRouter as Router,
@@ -6,6 +6,7 @@ import {
   Route,
   useNavigate,
   useLocation,
+  Navigate,
 } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./firebase";
@@ -13,6 +14,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { LanguageProvider } from "./contexts/LanguageContext";
 import PrivateRoute from "./routes/PrivateRoute";
 import PrivateRouteAdmin from "./routes/PrivateRouteAdmin";
+
 import Navbar from "./components/UI/Navbar";
 import { Toaster } from "react-hot-toast";
 
@@ -20,6 +22,7 @@ import { Toaster } from "react-hot-toast";
  * Public + User Pages
  * ------------------------------------------------------------ */
 import OnboardingSlides from "./pages/OnboardingSlides";
+import WelcomeBack from "./pages/WelcomeBack";
 import Home from "./pages/Home";
 import Items from "./pages/Items";
 import Donate from "./pages/Donate";
@@ -48,8 +51,35 @@ import AdminMoneyDonationsList from "./pages/AdminMoneyDonationsList";
 import AdminPickups from "./pages/AdminPickups";
 import AdminDonate from "./pages/AdminDonate";
 
+import { verifyFirestoreIndexes } from "./firebaseIndexHelper";
+
 /* ------------------------------------------------------------
- * Auth redirect + Navbar visibility controller
+ * Dev Mode Index Verification
+ * ------------------------------------------------------------ */
+if (process.env.NODE_ENV === "development") {
+  verifyFirestoreIndexes();
+}
+
+/* ------------------------------------------------------------
+ * Body Class Controller (Admin Mode Styling)
+ * ------------------------------------------------------------ */
+function BodyClassController() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const isAdmin = location.pathname.startsWith("/admin");
+    if (isAdmin) {
+      document.body.classList.add("admin-mode");
+    } else {
+      document.body.classList.remove("admin-mode");
+    }
+  }, [location.pathname]);
+
+  return null;
+}
+
+/* ------------------------------------------------------------
+ * Auth Redirect + Navbar visibility controller
  * ------------------------------------------------------------ */
 function AuthRedirectController({ setShowNavbar }) {
   const navigate = useNavigate();
@@ -57,31 +87,51 @@ function AuthRedirectController({ setShowNavbar }) {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
-      const isPublicPage = [
+      const path = location.pathname;
+      const isAdminPage = path.startsWith("/admin");
+      const publicPages = [
         "/login",
         "/signup",
         "/onboarding",
+        "/welcome-back",
         "/admin-login",
         "/unauthorized",
-      ].some((p) => location.pathname.startsWith(p));
+      ];
 
-      const isAdminPage = location.pathname.startsWith("/admin");
+      const isPublicPage = publicPages.some((p) => path.startsWith(p));
 
       if (user) {
+        // Show navbar except on admin pages
         setShowNavbar(!isAdminPage);
-        if (isPublicPage || location.pathname === "/") {
-          navigate("/items", { replace: true });
-        }
-      } else {
-        const hideNavbarRoutes = ["/onboarding", "/login", "/signup", "/admin"];
-        setShowNavbar(
-          !hideNavbarRoutes.some((p) => location.pathname.startsWith(p))
-        );
-        if (location.pathname === "/") {
+
+        // Onboarding logic
+        const seenOnboarding = localStorage.getItem("hasSeenOnboarding") === "true";
+        const seenWelcome = sessionStorage.getItem("hasSeenWelcome") === "true";
+
+        if (!seenOnboarding) {
+          localStorage.setItem("hasSeenOnboarding", "true");
           navigate("/onboarding", { replace: true });
+          return;
         }
+
+        if (!seenWelcome) {
+          sessionStorage.setItem("hasSeenWelcome", "true");
+          navigate("/welcome-back", { replace: true });
+          return;
+        }
+
+        // Already logged in but hitting a public page → go to items
+        if (isPublicPage) navigate("/items", { replace: true });
+
+      } else {
+        // User logged out
+        const hideNavbarRoutes = ["/onboarding", "/login", "/signup", "/admin"];
+        setShowNavbar(!hideNavbarRoutes.some((p) => path.startsWith(p)));
+
+        if (path === "/") navigate("/onboarding", { replace: true });
       }
     });
+
     return () => unsub();
   }, [navigate, location, setShowNavbar]);
 
@@ -89,7 +139,7 @@ function AuthRedirectController({ setShowNavbar }) {
 }
 
 /* ------------------------------------------------------------
- * Main App Component
+ * Main App
  * ------------------------------------------------------------ */
 function App() {
   const [showNavbar, setShowNavbar] = useState(false);
@@ -99,20 +149,22 @@ function App() {
       <LanguageProvider>
         <AuthProvider>
           <AuthRedirectController setShowNavbar={setShowNavbar} />
+          <BodyClassController />
+
           {showNavbar && <Navbar />}
 
-          {/* ✅ App Routes */}
           <Routes>
-            {/* Public + Onboarding */}
+            {/* Public Routes */}
             <Route path="/" element={<OnboardingSlides />} />
             <Route path="/onboarding" element={<OnboardingSlides />} />
+            <Route path="/welcome-back" element={<WelcomeBack />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/unauthorized" element={<Unauthorized />} />
             <Route path="/admin-login" element={<AdminLogin />} />
             <Route path="/health" element={<HealthCheck />} />
 
-            {/* User Routes */}
+            {/* User Routes (auth required) */}
             <Route
               path="/home"
               element={
@@ -121,7 +173,17 @@ function App() {
                 </PrivateRoute>
               }
             />
-            <Route path="/items" element={<Items />} />
+
+            {/* ⭐ protect items */}
+            <Route
+              path="/items"
+              element={
+                <PrivateRoute>
+                  <Items />
+                </PrivateRoute>
+              }
+            />
+
             <Route
               path="/donate"
               element={
@@ -131,16 +193,6 @@ function App() {
               }
             />
 
-            {/* ⚠️ Removed /subscribe page route (replaced with modal) */}
-            {/* <Route
-              path="/subscribe"
-              element={
-                <PrivateRoute>
-                  <DonateMoney />
-                </PrivateRoute>
-              }
-            /> */}
-
             <Route
               path="/myactivity"
               element={
@@ -149,6 +201,7 @@ function App() {
                 </PrivateRoute>
               }
             />
+
             <Route
               path="/profile"
               element={
@@ -157,6 +210,7 @@ function App() {
                 </PrivateRoute>
               }
             />
+
             <Route
               path="/deposit-instructions"
               element={
@@ -166,9 +220,7 @@ function App() {
               }
             />
 
-            {/* ------------------------------------------------------------
-             * Admin Protected Routes
-             * ------------------------------------------------------------ */}
+            {/* Admin routes */}
             <Route
               path="/admin"
               element={
@@ -177,6 +229,7 @@ function App() {
                 </PrivateRouteAdmin>
               }
             />
+
             <Route
               path="/admin/requests"
               element={
@@ -185,6 +238,7 @@ function App() {
                 </PrivateRouteAdmin>
               }
             />
+
             <Route
               path="/admin/items"
               element={
@@ -193,6 +247,7 @@ function App() {
                 </PrivateRouteAdmin>
               }
             />
+
             <Route
               path="/admin/item/:id"
               element={
@@ -201,6 +256,7 @@ function App() {
                 </PrivateRouteAdmin>
               }
             />
+
             <Route
               path="/admin/users"
               element={
@@ -209,6 +265,7 @@ function App() {
                 </PrivateRouteAdmin>
               }
             />
+
             <Route
               path="/admin/lottery"
               element={
@@ -217,6 +274,7 @@ function App() {
                 </PrivateRouteAdmin>
               }
             />
+
             <Route
               path="/admin/payments"
               element={
@@ -225,6 +283,7 @@ function App() {
                 </PrivateRouteAdmin>
               }
             />
+
             <Route
               path="/admin/payments/:id"
               element={
@@ -233,6 +292,7 @@ function App() {
                 </PrivateRouteAdmin>
               }
             />
+
             <Route
               path="/admin/money-donations"
               element={
@@ -241,6 +301,7 @@ function App() {
                 </PrivateRouteAdmin>
               }
             />
+
             <Route
               path="/admin/money-donations/:id"
               element={
@@ -250,7 +311,6 @@ function App() {
               }
             />
 
-            {/* ✅ Admin Create Sponsored Item Route */}
             <Route
               path="/admin/create-donation"
               element={
@@ -260,7 +320,6 @@ function App() {
               }
             />
 
-            {/* Deliveries Route */}
             <Route
               path="/admin/pickups"
               element={
@@ -269,23 +328,13 @@ function App() {
                 </PrivateRouteAdmin>
               }
             />
+
+            {/* fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
 
-          {/* ✅ Global Toast Notifications */}
-          <Toaster
-            position="top-center"
-            toastOptions={{
-              style: {
-                background: "#fff",
-                color: "#333",
-                borderRadius: "8px",
-                padding: "10px 16px",
-                fontSize: "0.9rem",
-              },
-              success: { iconTheme: { primary: "#10B981", secondary: "#fff" } },
-              error: { iconTheme: { primary: "#EF4444", secondary: "#fff" } },
-            }}
-          />
+          {/* Toast */}
+          <Toaster position="top-center" />
         </AuthProvider>
       </LanguageProvider>
     </Router>

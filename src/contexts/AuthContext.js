@@ -1,4 +1,4 @@
-// ✅ FILE: src/contexts/AuthContext.js
+// ✅ FILE: src/contexts/AuthContext.js - FIXED ADMIN ACCESS
 import React, {
   createContext,
   useContext,
@@ -60,53 +60,34 @@ export const AuthProvider = ({ children }) => {
       console.error("⚠️ refreshUser failed:", err);
     }
   }, []);
-   /* ------------------------------------------------------------
-   * 👀 Auth state listener
-   * ------------------------------------------------------------ */
-  useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        if (userDocUnsubRef.current) userDocUnsubRef.current(); // cleanup old listener
-
-        // Merge user data with Firestore live updates
-        const userRef = doc(db, "users", user.uid);
-        userDocUnsubRef.current = onSnapshot(
-          userRef,
-          (snap) => {
-            if (snap.exists()) {
-              setCurrentUser({ ...user, ...snap.data() });
-            } else {
-              setCurrentUser(user);
-            }
-          },
-          (err) => console.error("User doc snapshot error:", err)
-        );
-      } else {
-        if (userDocUnsubRef.current) userDocUnsubRef.current();
-        setCurrentUser(null);
-      }
-      setLoading(false);
-      setLoadingAuth(false);
-    });
-
-    return () => {
-      unsubAuth();
-      if (userDocUnsubRef.current) userDocUnsubRef.current();
-    };
-  }, []);
 
   /* ------------------------------------------------------------------ */
-  /* 🔐 Admin + User Composition Helpers                                */
+  /* 🔐 Admin + User Composition Helpers - FIXED                        */
   /* ------------------------------------------------------------------ */
   const checkAdminStatus = useCallback(async (user) => {
     if (!user) return false;
     try {
-      const idTokenResult = await user.getIdTokenResult();
-      if (idTokenResult.claims?.admin) return true;
-
+      // Method 1: Check Firebase Auth token claims
+      const idTokenResult = await user.getIdTokenResult(true); // Force refresh
+      console.log("🛡️ Auth Token Claims:", idTokenResult.claims);
+      
+      // Check for admin claim or email
+      if (idTokenResult.claims?.admin === true) return true;
+      if (idTokenResult.claims?.email === 'gnetstelecom@gmail.com') return true;
+      
+      // Method 2: Check Firestore admins collection
       const adminDocRef = doc(db, "admins", user.uid);
       const adminDocSnap = await getDoc(adminDocRef);
-      return adminDocSnap.exists();
+      const isAdminFromFirestore = adminDocSnap.exists();
+      
+      console.log("🛡️ Admin check results:", {
+        email: user.email,
+        uid: user.uid,
+        fromClaims: idTokenResult.claims?.admin || idTokenResult.claims?.email === 'gnetstelecom@gmail.com',
+        fromFirestore: isAdminFromFirestore
+      });
+      
+      return isAdminFromFirestore;
     } catch (error) {
       console.error("Admin check error:", error);
       return false;
@@ -125,12 +106,19 @@ export const AuthProvider = ({ children }) => {
     const isSubscribed = !!profile.isSubscribed;
     const isTrialExpired = trialCreditsLeft <= 0 && !isSubscribed;
 
+    // DEBUG: Log admin status
+    console.log("👑 User Composition:", {
+      email: authUser.email,
+      isAdminFlag,
+      role: isAdminFlag ? "admin" : profile.role || "user"
+    });
+
     return {
       uid: authUser.uid,
       email: authUser.email,
       emailVerified: authUser.emailVerified,
       username: profile.username || null,
-      isAdmin: !!isAdminFlag,
+      isAdmin: !!isAdminFlag, // ✅ This is the key property
       role: isAdminFlag ? "admin" : profile.role || "user",
       ...profile,
       trialCreditsLeft,
@@ -390,13 +378,13 @@ export const AuthProvider = ({ children }) => {
   }, [fetchUserDataOnce]);
 
   /* ------------------------------------------------------------------ */
-  /* 👀 Auth State Observer                                             */
+  /* 👀 Auth State Observer - FIXED                                     */
   /* ------------------------------------------------------------------ */
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       try {
         if (user) {
-          await user.getIdToken(true);
+          await user.getIdToken(true); // Force token refresh
           await attachUserDocListener(user);
         } else {
           if (userDocUnsubRef.current) {
@@ -405,6 +393,8 @@ export const AuthProvider = ({ children }) => {
           }
           setCurrentUser(null);
         }
+      } catch (error) {
+        console.error("Auth state change error:", error);
       } finally {
         setLoading(false);
         setLoadingAuth(false);
@@ -421,11 +411,24 @@ export const AuthProvider = ({ children }) => {
   }, [attachUserDocListener]);
 
   /* ------------------------------------------------------------------ */
-  /* 🌍 Context Value (Hybrid Backward-Compatible)                      */
+  /* 🌍 Context Value (FIXED Admin Access)                              */
   /* ------------------------------------------------------------------ */
   const trialCreditsLeft = currentUser?.trialCreditsLeft ?? 0;
   const isSubscribed = !!currentUser?.isSubscribed;
   const isTrialExpired = trialCreditsLeft <= 0 && !isSubscribed;
+
+  // ✅ FIXED: Make isAdmin a property, not a function
+  const isAdmin = !!currentUser?.isAdmin;
+
+  console.log("🔍 AuthContext Final State:", {
+    currentUser: currentUser ? {
+      email: currentUser.email,
+      uid: currentUser.uid,
+      isAdmin: currentUser.isAdmin,
+      role: currentUser.role
+    } : null,
+    isAdmin
+  });
 
   const value = {
     currentUser,
@@ -440,15 +443,18 @@ export const AuthProvider = ({ children }) => {
     markUserSubscribed,
     getUserProfile,
     updateTrialCredits,
- refreshUser,
+    refreshUser,
+    
     // ✅ Reactive values
     trialCreditsLeft,
     isSubscribed,
     isTrialExpired,
-
+    
+    // ✅ FIXED: isAdmin as property (not function)
+    isAdmin: isAdmin,
+    
     // ✅ Compatibility helpers
     isAuthenticated: !!currentUser,
-    isAdmin: () => currentUser?.isAdmin || false, // ← restored callable for Navbar
   };
 
   return (

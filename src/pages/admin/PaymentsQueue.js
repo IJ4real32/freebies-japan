@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import PaymentReviewCard from "./PaymentReviewCard";
 import { adminGetPaymentQueue } from "../../services/functionsApi";
 import toast from "react-hot-toast";
+import { checkAdminStatus } from "../../utils/adminUtils";
 
 export default function PaymentsQueue() {
   const [payments, setPayments] = useState([]);

@@ -5,7 +5,9 @@ import { adminGetMoneyDonationsQueue } from "../services/functionsApi";
 import { db } from "../firebase";
 import { doc, getDoc } from "firebase/firestore";
 import toast from "react-hot-toast";
-import { isAdmin } from "../utils/adminUtils";
+import { checkAdminStatus } from "../utils/adminUtils";
+
+
 import { Menu, X, Home, ChevronRight, RefreshCcw } from "lucide-react";
 
 export default function AdminMoneyDonationsList() {
@@ -22,7 +24,7 @@ export default function AdminMoneyDonationsList() {
     const load = async () => {
       try {
         setLoading(true);
-        const ok = await isAdmin();
+        const ok = await checkAdminStatus();
         if (!ok) {
           navigate("/unauthorized");
           return;

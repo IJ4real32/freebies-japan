@@ -12,7 +12,7 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
 import { useTranslation } from "../hooks/useTranslation";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { v4 as uuidv4 } from "uuid";
 import { ChevronDown } from "lucide-react";
@@ -44,7 +44,7 @@ const SIZE_FEES = {
   oversized: { min: 2000, max: 3000 },
 };
 
-// ✅ New: Request windows for free donations
+// ✅ Request windows for free donations
 const REQUEST_WINDOWS = [
   { label: "24 hours", hours: 24 },
   { label: "48 hours", hours: 48 },
@@ -58,6 +58,8 @@ export default function Donate() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const addressRef = useRef(null);
+  const [searchParams] = useSearchParams();
+  const relistId = searchParams.get("relist");
 
   const [loadingZipcode, setLoadingZipcode] = useState(false);
   const [addressOpen, setAddressOpen] = useState(false);
@@ -109,6 +111,54 @@ export default function Donate() {
     })();
   }, [currentUser]);
 
+  /* -------------------- 🆕 Relist Prefill Logic -------------------- */
+  useEffect(() => {
+    if (!relistId || !currentUser) return;
+    (async () => {
+      try {
+        const oldDoc = await getDoc(doc(db, "donations", relistId));
+        if (oldDoc.exists()) {
+          const d = oldDoc.data();
+          if (d.donorId !== currentUser.uid) {
+            toast.error("You can only relist your own items.");
+            return;
+          }
+          setForm((f) => ({
+            ...f,
+            title: d.title || "",
+            description: d.description || "",
+            category: d.category || "",
+            condition: d.condition || "good",
+            type: d.type || "free",
+            price: d.price || "",
+            size: d.size || "",
+            addressLine1: d.pickupAddress?.addressLine1 || "",
+            addressLine2: d.pickupAddress?.addressLine2 || "",
+            city: d.pickupAddress?.city || "",
+            postalCode: d.pickupAddress?.postalCode || "",
+            prefecture: d.pickupAddress?.prefecture || "",
+          }));
+          if (d.images?.length) {
+            const fetchedImages = await Promise.all(
+              d.images.map(async (url) => {
+                const res = await fetch(url);
+                const blob = await res.blob();
+                return new File([blob], "relist.jpg", { type: blob.type });
+              })
+            );
+            setImages(fetchedImages.slice(0, 4));
+          }
+          toast.success("♻️ Prefilled from your previous donation!");
+        } else {
+          toast.error("Original item not found or removed.");
+        }
+      } catch (err) {
+        console.error(err);
+        toast.error("Failed to load relist data.");
+      }
+    })();
+  }, [relistId, currentUser]);
+
   /* -------------------- Zipcode Autofill -------------------- */
   const fetchAddressFromZipcode = async (zip) => {
     const clean = zip.replace(/-/g, "");
@@ -136,7 +186,7 @@ export default function Donate() {
   /* -------------------- Input Handlers -------------------- */
   const sanitizeText = (v = "") =>
     v
-      .replace(/[^a-zA-Z0-9\s.,!()&'":;/-]/g, "")
+      .replace(/[^a-zA-Z0-9\s.,!()&'\":;/-]/g, "")
       .replace(/\s{2,}/g, " ")
       .replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -245,11 +295,16 @@ export default function Donate() {
               ),
             }
           : {}),
+        ...(relistId ? { relistedFrom: relistId } : {}),
       };
 
       await addDoc(collection(db, "donations"), donation);
-      toast.success("🎉 Donation submitted successfully!");
-      setSuccessMsg("✅ Donation submitted! Redirecting to My Activity…");
+      toast.success(relistId ? "♻️ Item relisted successfully!" : "🎉 Donation submitted successfully!");
+      setSuccessMsg(
+        relistId
+          ? "✅ Relisted! Redirecting to My Activity…"
+          : "✅ Donation submitted! Redirecting to My Activity…"
+      );
       setTimeout(() => navigate("/myactivity", { replace: true }), 1200);
     } catch (err) {
       console.error(err);
@@ -265,7 +320,7 @@ export default function Donate() {
     <div className="min-h-screen bg-gray-50 w-full overflow-x-hidden">
       <main className="max-w-3xl mx-auto px-4 py-8 sm:py-10">
         <h1 className="text-2xl sm:text-3xl font-bold mb-6 text-gray-800">
-          {t("donate") || "Donate an Item"}
+          {relistId ? "♻️ Relist Your Item" : t("donate") || "Donate an Item"}
         </h1>
 
         {errorMsg && (
@@ -548,7 +603,7 @@ export default function Donate() {
               disabled={submitting || !canSubmit}
               className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-6 py-2 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 transition-colors duration-200"
             >
-              {submitting ? "Uploading..." : "Donate Now"}
+              {submitting ? "Uploading..." : relistId ? "Relist Item" : "Donate Now"}
             </button>
           </div>
         </form>

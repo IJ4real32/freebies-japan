@@ -1,9 +1,13 @@
+/* ---------------------------------------------------------
+   TAILWIND CORE
+--------------------------------------------------------- */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+
 /* ---------------------------------------------------------
-   🌐 Global mobile-friendly scaling (User pages)
+   🌐 GLOBAL USER-SIDE META + MOBILE FIRST NORMALIZATION
 --------------------------------------------------------- */
 html,
 body {
@@ -27,7 +31,6 @@ table {
   border-collapse: collapse;
 }
 
-/* 🧱 Container normalization */
 .page-container {
   width: 100%;
   padding-left: 1rem;
@@ -35,19 +38,21 @@ table {
   margin: 0 auto;
 }
 
-/* 📱 Improve button touch targets */
+/* Tap-friendly controls */
 button {
   min-height: 44px;
   min-width: 44px;
 }
 
-/* 🧭 Better tap spacing for links */
 a {
   text-decoration: none;
   color: inherit;
 }
 
-/* 🪶 Font adjustments for mobile (User pages only) */
+
+/* ---------------------------------------------------------
+   📱 MOBILE TYPOGRAPHY TUNING
+--------------------------------------------------------- */
 @media (max-width: 640px) {
   body:not(.admin-mode) {
     font-size: 0.95rem;
@@ -74,16 +79,18 @@ a {
   }
 }
 
-/* ✅ Make Navbar extend into iPhone notch area */
+
+/* ---------------------------------------------------------
+   📱 SAFE AREA (iPhone Notch Support + Mobile Navbar)
+--------------------------------------------------------- */
 :root {
   --safe-area-inset-top: env(safe-area-inset-top);
   --safe-area-inset-bottom: env(safe-area-inset-bottom);
 }
 
-/* ✅ Core Navbar style (blue + safe area padding) */
 .navbar-safe {
-  padding-top: calc(0.5rem + var(--safe-area-inset-top, 0px));
-  background-color: #1e3a8a; /* deep blue */
+  padding-top: calc(0.5rem + var(--safe-area-inset-top));
+  background-color: #1e3a8a;
   color: white;
   position: sticky;
   top: 0;
@@ -91,13 +98,11 @@ a {
   transition: background-color 0.4s ease, box-shadow 0.4s ease;
 }
 
-/* ✅ Add smooth fade on scroll */
 .navbar-safe.scrolled {
-  background-color: #153e8f; /* slightly darker shade when scrolled */
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  background-color: #153e8f;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
 }
 
-/* ✅ Mobile-only: blue body background under status bar */
 @supports (padding: env(safe-area-inset-top)) {
   @media (max-width: 768px) {
     body:not(.admin-mode) {
@@ -106,54 +111,50 @@ a {
   }
 }
 
-/* ==========================================================
-   🖥️ ADMIN DESKTOP-FIRST MODE
-   Activated by adding body.admin-mode (via AdminLayout.jsx)
-========================================================== */
 
-/* ✅ Always keep horizontal space for tables and sidebars */
+/* ---------------------------------------------------------
+   🖥️ ADMIN MODE (Desktop-first) - FIXED VERSION
+--------------------------------------------------------- */
 body.admin-mode {
   overflow-x: auto !important;
-  min-width: 1024px !important;
+  /* REMOVED: min-width: 1024px !important; ← This was causing issues */
   font-size: 0.95rem;
   background-color: #f5f6fa;
   -webkit-text-size-adjust: 100%;
 }
 
-/* ✅ Admin main layout grid */
-body.admin-mode main {
+/* REMOVED: Grid layout constraints - Let React components handle layout */
+/* body.admin-mode main {
   display: grid;
   grid-template-columns: 240px 1fr;
   gap: 2rem;
-  align-items: flex-start;
   margin-top: 80px;
-}
+} */
 
-/* ✅ Sidebar */
-body.admin-mode aside {
+/* REMOVED: Fixed sidebar styles - Let React handle sidebar positioning */
+/* body.admin-mode aside {
   position: sticky;
   top: 80px;
-  align-self: start;
   background-color: #fff;
   border-radius: 0.75rem;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
   padding: 1rem;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
   min-height: calc(100vh - 100px);
-}
+} */
 
-/* ✅ Admin content area */
+/* Admin content - FIXED: Remove fixed constraints */
 body.admin-mode section {
   background-color: #fff;
   border-radius: 0.75rem;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
   padding: 2rem;
-  overflow-x: auto;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  /* REMOVED: overflow-x: auto; ← Let components handle overflow */
 }
 
-/* ✅ Fix table layout in admin pages */
+/* Admin tables - FIXED: Remove fixed table layout */
 body.admin-mode table {
   width: 100%;
-  table-layout: fixed;
+  /* REMOVED: table-layout: fixed; ← Let content determine width */
   border-collapse: collapse;
   border: 1px solid #e5e7eb;
 }
@@ -167,194 +168,166 @@ body.admin-mode td {
 body.admin-mode th {
   background-color: #f9fafb;
   font-weight: 600;
-  text-transform: uppercase;
   font-size: 0.8rem;
+  text-transform: uppercase;
   color: #4b5563;
 }
 
-/* ✅ Admin modals centered */
+/* Admin modals */
 body.admin-mode .modal {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  z-index: 50;
+  background: rgba(0,0,0,0.5);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 50;
 }
 
-/* ✅ Admin card hover */
+/* Sidebar hover */
 body.admin-mode .admin-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
   transition: all 0.2s ease-in-out;
 }
 
-/* ✅ Disable admin scaling on smaller screens */
-@media (max-width: 1024px) {
+/* FIXED: Remove the zoom on smaller screens */
+/* @media (max-width: 1024px) {
   body.admin-mode {
     zoom: 0.85;
   }
+} */
+
+/* NEW: Ensure admin content takes full width */
+body.admin-mode .admin-content-full {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
-/* ======================================================
-   ✅ GLOBAL AUTOFILL FIX — Ensures consistent white fields
-   ====================================================== */
+
+/* NEW: Remove any container constraints in admin mode */
+body.admin-mode .container,
+body.admin-mode .mx-auto,
+body.admin-mode .max-w-7xl,
+body.admin-mode .max-w-screen-xl,
+body.admin-mode .max-w-screen-2xl {
+  max-width: none !important;
+  width: 100% !important;
+}
+
+
+/* ---------------------------------------------------------
+   ✨ INPUT STYLING + AUTOFILL FIX
+--------------------------------------------------------- */
 input:-webkit-autofill,
 textarea:-webkit-autofill,
 select:-webkit-autofill {
-  -webkit-box-shadow: 0 0 0px 1000px white inset !important;
-  box-shadow: 0 0 0px 1000px white inset !important;
+  -webkit-box-shadow: 0 0 0 1000px white inset !important;
+  box-shadow: 0 0 0 1000px white inset !important;
   -webkit-text-fill-color: #111 !important;
-  transition: background-color 5000s ease-in-out 0s;
 }
 
-/* Make sure dark mode or browser color schemes don't override it */
 input,
 textarea,
 select {
   background-color: #fff !important;
   color: #111 !important;
-  font-family: 'Inter', 'Noto Sans JP', system-ui, sans-serif;
-  letter-spacing: 0.02em;
-}
-
-/* ✅ Uniform Radio Button Styling (Light + Dark Mode) */
-input[type="radio"] {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  width: 1rem;
-  height: 1rem;
-  border: 2px solid #cbd5e1; /* Tailwind gray-300 */
-  border-radius: 9999px;
-  background-color: #fff;
-  cursor: pointer;
-  position: relative;
-  transition: all 0.2s ease;
-}
-
-/* Selected (checked) state */
-input[type="radio"]:checked {
-  border-color: #4f46e5; /* Tailwind indigo-600 */
-  background-color: #4f46e5;
-  box-shadow: 0 0 0 2px #c7d2fe; /* light blue ring */
-}
-
-/* Hover and focus effects */
-input[type="radio"]:hover {
-  border-color: #818cf8; /* indigo-400 */
-}
-input[type="radio"]:focus {
-  outline: none;
-  box-shadow: 0 0 0 2px #c7d2fe;
-}
-
-/* Dark mode support */
-@media (prefers-color-scheme: dark) {
-  input[type="radio"] {
-    border-color: #4b5563; /* gray-600 */
-    background-color: #1f2937; /* gray-800 */
-  }
-  input[type="radio"]:checked {
-    background-color: #6366f1; /* indigo-500 */
-    border-color: #818cf8;
-  }
-}
-
-/* ======================================================
-   ✨ GLOBAL INPUT READABILITY + SANITIZATION SUPPORT
-   ====================================================== */
-
-/* ✅ Natural readable spacing & font consistency */
-input,
-textarea,
-select {
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  width: 100%;
   font-family: 'Inter', 'Noto Sans JP', system-ui, sans-serif;
   font-size: 15px;
   letter-spacing: 0.02em;
   line-height: 1.6;
-  word-spacing: 0.05em;
-  background-color: #fff !important;
-  color: #111 !important;
-  border: 1px solid #d1d5db; /* gray-300 */
-  border-radius: 0.5rem;
-  padding: 0.6rem 0.75rem;
-  width: 100%;
   transition: all 0.2s ease;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-/* ✅ Safe placeholder visibility & color */
 ::placeholder {
   color: #9ca3af;
   font-size: 14.5px;
-  font-weight: 400;
   opacity: 0.9;
-  letter-spacing: 0.02em;
 }
 
-/* ✅ Hover feedback (light gray border tone) */
 input:hover,
 textarea:hover,
 select:hover {
-  border-color: #a5b4fc; /* indigo-300 */
+  border-color: #a5b4fc;
 }
 
-/* ✅ Focus outline (consistent across browsers) */
 input:focus,
 textarea:focus,
 select:focus {
-  border-color: #6366f1; /* indigo-500 */
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99,102,241,0.25);
   outline: none;
 }
 
-/* ✅ Disabled state */
 input:disabled,
 textarea:disabled,
 select:disabled {
-  background-color: #f3f4f6 !important; /* gray-100 */
+  background-color: #f3f4f6 !important;
   color: #9ca3af !important;
   cursor: not-allowed;
 }
 
-/* ✅ Prevent double spacing or zoom issues on mobile */
-input,
-textarea {
-  font-size: 16px;
-  -webkit-text-size-adjust: 100%;
-}
-
-/* ✅ Unified label spacing and tone */
 label {
   display: block;
   margin-bottom: 0.25rem;
   font-weight: 500;
   color: #1f2937;
-  letter-spacing: 0.01em;
 }
 
-/* ✅ Selection highlight color */
 ::selection {
-  background-color: rgba(99, 102, 241, 0.25);
+  background-color: rgba(99,102,241,0.25);
   color: #1f2937;
 }
 
-/* ✅ Optional: Smooth input transitions globally */
 * {
   scroll-behavior: smooth;
   -webkit-tap-highlight-color: transparent;
 }
+
+
 /* ---------------------------------------------------------
-   ✅ Global Input Spacing Fix
+   🎛️ RADIO BUTTONS (Custom Unified Style)
 --------------------------------------------------------- */
-input[type="text"],
-input[type="email"],
-input[type="password"],
-textarea {
-  white-space: pre-wrap !important;
-  word-break: break-word !important;
-  caret-color: auto;
-  font-feature-settings: "liga" 1; /* enable normal ligatures */
+input[type="radio"] {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid #cbd5e1;
+  border-radius: 9999px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+input[type="radio"]:checked {
+  border-color: #4f46e5;
+  background-color: #4f46e5;
+  box-shadow: 0 0 0 2px #c7d2fe;
+}
+
+input[type="radio"]:hover {
+  border-color: #818cf8;
+}
+
+input[type="radio"]:focus {
+  box-shadow: 0 0 0 2px #c7d2fe;
+}
+
+@media (prefers-color-scheme: dark) {
+  input[type="radio"] {
+    border-color: #4b5563;
+    background-color: #1f2937;
+  }
+
+  input[type="radio"]:checked {
+    background-color: #6366f1;
+    border-color: #818cf8;
+  }
 }

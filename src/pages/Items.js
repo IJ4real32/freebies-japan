@@ -1,4 +1,4 @@
-// ✅ FILE: src/pages/Items.js (With Size + Delivery Estimate + Auto Subscription Modal)
+// ✅ FILE: src/pages/Items.js (PATCHED - Fixed Admin Sponsored Items Display)
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -16,7 +16,7 @@ import { useAuth } from "../contexts/AuthContext";
 import SubscriptionBanner from "../components/UI/SubscriptionBanner";
 import SubscriptionModal from "../components/Payments/SubscriptionModal";
 import ItemDepositButton from "../components/Payments/ItemDepositButton";
-import { X, ArrowLeft, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { X, ArrowLeft, ChevronLeft, ChevronRight, Search, Crown } from "lucide-react";
 import toast from "react-hot-toast";
 import { throttle } from "lodash";
 
@@ -32,6 +32,15 @@ function formatTimeRemaining(endAt) {
   const mins = Math.floor((diff / 1000 / 60) % 60);
   return hrs > 0 ? `${hrs}h ${mins}m left` : `${mins}m left`;
 }
+
+/* Helper: validate item */
+const isValidItem = (item) => {
+  if (!item || !item.id) return false;
+  if (!item.title || item.title.trim() === "") return false;
+  if (!item.images || !Array.isArray(item.images) || item.images.length === 0) return false;
+  if (!item.images[0] || typeof item.images[0] !== 'string' || item.images[0].trim() === "") return false;
+  return true;
+};
 
 export default function Items() {
   const navigate = useNavigate();
@@ -60,40 +69,61 @@ export default function Items() {
   }, [trialCreditsLeft, isTrialExpired]);
 
   /* =========================
-   * Load Items
+   * Load Items - UPDATED: Include sponsored items
    * ========================= */
   const fetchInitial = useCallback(async () => {
     setLoading(true);
-    const q = query(
-      collection(db, "donations"),
-      where("status", "in", ["active", "open", "awarded", "closed"]),
-      orderBy("createdAt", "desc"),
-      limit(PAGE_SIZE)
-    );
-    const snap = await getDocs(q);
-    const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    setItems(docs);
-    setLastVisible(snap.docs[snap.docs.length - 1]);
-    setLoading(false);
+    try {
+      // ✅ UPDATED: Query includes both active user items and admin sponsored items
+      const q = query(
+        collection(db, "donations"),
+        where("status", "in", ["active", "sponsored"]), // ✅ Added "sponsored" status
+        orderBy("createdAt", "desc"),
+        limit(PAGE_SIZE)
+      );
+      const snap = await getDocs(q);
+      const docs = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter(isValidItem); // Filter out invalid items
+      
+      console.log("📦 Loaded items:", docs.length, "Sponsored items:", docs.filter(item => item.isSponsored || item.donorType === 'admin').length);
+      
+      setItems(docs);
+      setLastVisible(snap.docs[snap.docs.length - 1]);
+    } catch (error) {
+      console.error("Error loading items:", error);
+      toast.error("Failed to load items");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const loadMore = useCallback(async () => {
     if (!lastVisible || loadingMore) return;
     setLoadingMore(true);
-    const q = query(
-      collection(db, "donations"),
-      where("status", "in", ["active", "open", "awarded", "closed"]),
-      orderBy("createdAt", "desc"),
-      startAfter(lastVisible),
-      limit(PAGE_SIZE)
-    );
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      const newItems = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setItems((p) => [...p, ...newItems]);
-      setLastVisible(snap.docs[snap.docs.length - 1]);
+    try {
+      const q = query(
+        collection(db, "donations"),
+        where("status", "in", ["active", "sponsored"]), // ✅ Added "sponsored" status
+        orderBy("createdAt", "desc"),
+        startAfter(lastVisible),
+        limit(PAGE_SIZE)
+      );
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const newItems = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter(isValidItem); // Filter out invalid items
+        
+        setItems((p) => [...p, ...newItems]);
+        setLastVisible(snap.docs[snap.docs.length - 1]);
+      }
+    } catch (error) {
+      console.error("Error loading more items:", error);
+      toast.error("Failed to load more items");
+    } finally {
+      setLoadingMore(false);
     }
-    setLoadingMore(false);
   }, [lastVisible, loadingMore]);
 
   useEffect(() => {
@@ -109,6 +139,14 @@ export default function Items() {
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, [loadMore]);
+
+  // Additional client-side filtering as backup
+  useEffect(() => {
+    const validItems = items.filter(isValidItem);
+    if (validItems.length !== items.length) {
+      setItems(validItems);
+    }
+  }, [items]);
 
   // Keyboard navigation for drawer images
   useEffect(() => {
@@ -140,6 +178,7 @@ export default function Items() {
       setSubmitting(true);
 
       try {
+        // ✅ FIXED: Check if user owns the item (including admin items)
         if (item.donorId === currentUser.uid) {
           toast.error("🚫 You cannot request your own donation.");
           setSubmitting(false);
@@ -172,7 +211,7 @@ export default function Items() {
         // ✅ Trial enforcement
         if (!isSubscribed && (trialOver || trialLeft <= 0)) {
           toast(
-            "🎁 You’ve used all free requests. Please deposit ¥1,500 to continue!",
+            "🎁 You've used all free requests. Please deposit ¥1,500 to continue!",
             { icon: "🙏" }
           );
           setShowSubscriptionModal(true);
@@ -209,6 +248,11 @@ export default function Items() {
     (item) => currentUser && item.donorId === currentUser.uid,
     [currentUser]
   );
+
+  // ✅ NEW: Check if item is sponsored/admin item
+  const isSponsoredItem = useCallback((item) => {
+    return item.isSponsored || item.donorType === 'admin' || item.sponsoredBy;
+  }, []);
 
   /* =========================
    * UI
@@ -266,16 +310,27 @@ export default function Items() {
                 const isAwarded = item.status === "awarded";
                 const isClosed = item.status === "closed";
                 const isOwner = isCurrentUserOwner(item);
+                const isSponsored = isSponsoredItem(item);
 
                 return (
                   <div
                     key={item.id}
-                    className="relative bg-white rounded-2xl shadow hover:shadow-lg transition-all duration-200 cursor-pointer group overflow-hidden"
+                    className={`relative rounded-2xl shadow hover:shadow-lg transition-all duration-200 cursor-pointer group overflow-hidden ${
+                      isSponsored ? 'bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-200' : 'bg-white'
+                    }`}
                     onClick={() => {
                       setViewItem(item);
                       setImageIndex(0);
                     }}
                   >
+                    {/* Sponsored Badge */}
+                    {isSponsored && (
+                      <div className="absolute top-2 right-2 z-20 bg-gradient-to-r from-purple-600 to-blue-600 text-white text-xs px-2 py-1 rounded-full font-semibold flex items-center gap-1">
+                        <Crown size={12} />
+                        Sponsored
+                      </div>
+                    )}
+
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-10">
                       <button className="bg-white/90 backdrop-blur text-gray-900 px-4 py-2 rounded-full text-sm font-semibold shadow hover:bg-white transition">
                         View More
@@ -382,7 +437,9 @@ export default function Items() {
           onClick={() => setViewItem(null)}
         >
           <div
-            className="bg-white rounded-t-2xl md:rounded-lg shadow-xl w-full md:w-[90%] max-w-md p-6 relative animate-slideUp"
+            className={`bg-white rounded-t-2xl md:rounded-lg shadow-xl w-full md:w-[90%] max-w-md p-6 relative animate-slideUp ${
+              isSponsoredItem(viewItem) ? 'border-l-4 border-purple-500' : ''
+            }`}
             onClick={(e) => e.stopPropagation()}
           >
             <button
@@ -401,6 +458,16 @@ export default function Items() {
             {isCurrentUserOwner(viewItem) && (
               <div className="absolute top-3 left-12 bg-yellow-500 text-white text-sm px-3 py-1 rounded-full font-semibold z-10">
                 Your Item
+              </div>
+            )}
+
+            {/* Sponsored Header */}
+            {isSponsoredItem(viewItem) && (
+              <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white text-sm px-4 py-2 rounded-lg mb-4 flex items-center gap-2">
+                <Crown size={16} />
+                <span className="font-semibold">
+                  🏢 Sponsored by {viewItem.sponsoredBy || 'Freebies Japan'}
+                </span>
               </div>
             )}
 
@@ -465,6 +532,12 @@ export default function Items() {
             )}
 
             <div className="flex flex-wrap justify-center gap-2 mb-3">
+              {isSponsoredItem(viewItem) && (
+                <span className="bg-gradient-to-r from-purple-600 to-blue-600 text-white text-xs px-2 py-0.5 rounded flex items-center gap-1">
+                  <Crown size={12} />
+                  Sponsored
+                </span>
+              )}
               {viewItem.verified && (
                 <span className="bg-green-600 text-white text-xs px-2 py-0.5 rounded">
                   ✅ Verified
