@@ -1,4 +1,4 @@
-// ✅ FILE: src/components/UI/Navbar.jsx (REMOVED DONATE LINKS)
+// ✅ FILE: src/components/UI/Navbar.jsx (Optimized + Scaled Logo + Scroll Hide)
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
@@ -13,46 +13,45 @@ import {
   Package,
   User,
   Shield,
-} from "lucide-react"; // Removed PlusCircle import
+} from "lucide-react";
 
 const languages = [
   { code: "en", name: "English", flag: "🇬🇧" },
   { code: "ja", name: "日本語", flag: "🇯🇵" },
 ];
 
-export default function Navbar({ isTransparent = false }) {
-  /** *************************************
-   *  ALL HOOKS MUST BE AT THE TOP 💯
-   **************************************/
+export default function Navbar() {
   const { currentUser, logout, isAdmin, loadingAuth } = useAuth();
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [langMenuOpen, setLangMenuOpen] = useState(false);
-  const [mobileMenu, setMobileMenu] = useState(false);
-  const [hidden, setHidden] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
-  const [logoSmall, setLogoSmall] = useState(false);
-
-  const navigate = useNavigate();
-  const location = useLocation();
   const { t } = useTranslation();
   const { language, setLanguage } = useLanguage();
 
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const [langMenuOpen, setLangMenuOpen] = useState(false);
+
+  const [hidden, setHidden] = useState(false);
+  const [logoSmall, setLogoSmall] = useState(false);
+
   const isAdminRoute = location.pathname.startsWith("/admin");
 
-  /** *************************************
-   *  EFFECTS – ALWAYS SAFE HERE
-   **************************************/
+  /* ------------------------------------------------------------
+   * Scroll: hide on scroll-down, show on scroll-up
+   ------------------------------------------------------------ */
   useEffect(() => {
     let lastY = window.scrollY;
     let ticking = false;
 
-    const onScroll = () => {
+    const handleScroll = () => {
       if (!ticking) {
         window.requestAnimationFrame(() => {
           const current = window.scrollY;
-          setScrolled(current > 10);
-          setHidden(current > lastY && current > 70);
-          setLogoSmall(current > 30);
+
+          setHidden(current > lastY && current > 40);
+          setLogoSmall(current > 20);
+
           lastY = current;
           ticking = false;
         });
@@ -60,77 +59,53 @@ export default function Navbar({ isTransparent = false }) {
       }
     };
 
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
+  /* Close menus on route change */
   useEffect(() => {
+    setDropdownOpen(false);
     setMobileMenu(false);
     setLangMenuOpen(false);
-    setDropdownOpen(false);
   }, [location.pathname]);
 
-  /** *************************************
-   *  SAFE EARLY RETURN — FIXED VERSION
-   **************************************/
+  /* Hide for Admin pages */
+  if (isAdminRoute || loadingAuth || !currentUser) return null;
 
-  // Hide navbar completely on admin routes (intentional)
-  if (isAdminRoute) {
-    return null;
-  }
-
-  // Wait for Firebase auth + Firestore profile + claims
-  if (loadingAuth) {
-    return null;
-  }
-
-  // Hide navbar on public pages until user is known
-  if (!currentUser) {
-    return null;
-  }
-
-  /** *************************************
-   *  Handlers
-   **************************************/
+  /* Logout handler */
   const handleLogout = async () => {
-    if (window.confirm(t("confirmLogout") || "Logout?")) {
-      await logout();
-      localStorage.setItem("hasSeenOnboarding", "true");
-      navigate("/onboarding");
-    }
+    if (!window.confirm("Logout?")) return;
+    await logout();
+    localStorage.setItem("hasSeenOnboarding", "true");
+    navigate("/onboarding");
   };
 
-  const base = "fixed top-0 left-0 w-full z-50 transition-all duration-500";
-  const translate = hidden ? "-translate-y-full" : "translate-y-0";
-  const background = scrolled
-    ? "bg-blue-900/95 shadow-lg backdrop-blur"
-    : isTransparent
-    ? "bg-transparent"
-    : "bg-blue-900";
+  /* Classes */
+  const navHidden = hidden ? "-translate-y-full" : "translate-y-0";
+  const bg = "bg-blue-900/95 shadow-md backdrop-blur";
 
   const currentPath = location.pathname;
 
-  /** *************************************
-   *  UI RETURN – SAFE
-   **************************************/
   return (
     <>
-      {/* TOP NAV */}
-      <nav
-        className={`${base} ${translate} ${background} text-white pt-[env(safe-area-inset-top)]`}
-      >
-        <div className="max-w-7xl mx-auto flex justify-between items-center px-4 sm:px-6 py-2 sm:py-3">
+      {/* TOP NAVBAR */}
+      <nav className={`fixed top-0 left-0 w-full z-50 transition-all duration-500 ${navHidden} ${bg}`}>
+        <div className="max-w-7xl mx-auto flex justify-between items-center px-4 py-2">
 
-          {/* Logo */}
-          <Link to="/items" className="flex items-center gap-2">
+          {/* 🔥 Scaled Logo (does NOT change navbar height) */}
+          <Link to="/items" className="flex items-center">
             <img
               src="/LogoX.png"
               alt="Freebies Japan"
-              className={`${logoSmall ? "h-10 sm:h-12" : "h-14 sm:h-20"} transition-all`}
+               className={`h-10 sm:h-12 transform transition-transform duration-300 ${
+    logoSmall ? "scale-90" : "scale-[3]"
+              }`}
+              style={{ transformOrigin: "center" }}
             />
           </Link>
 
-          {/* Desktop Navigation */}
+          {/* DESKTOP NAV */}
           <div className="hidden md:flex items-center gap-6 text-sm font-medium">
 
             <Link
@@ -140,14 +115,6 @@ export default function Navbar({ isTransparent = false }) {
               {t("items")}
             </Link>
 
-            {/* 🚫 REMOVED: Donate Link */}
-            {/* <Link
-              to="/donate"
-              className={currentPath === "/donate" ? "text-blue-200 font-semibold" : "hover:text-blue-200"}
-            >
-              {t("donate")}
-            </Link> */}
-
             <Link
               to="/myactivity"
               className={currentPath === "/myactivity" ? "text-blue-200 font-semibold" : "hover:text-blue-200"}
@@ -155,17 +122,14 @@ export default function Navbar({ isTransparent = false }) {
               {t("My Activity")}
             </Link>
 
-            {/* Language dropdown */}
+            {/* Language Menu */}
             <div className="relative">
-              <button
-                onClick={() => setLangMenuOpen(!langMenuOpen)}
-                className="flex items-center gap-1 hover:text-blue-200"
-              >
+              <button onClick={() => setLangMenuOpen(!langMenuOpen)} className="hover:text-blue-200">
                 <Globe size={18} />
               </button>
 
               {langMenuOpen && (
-                <div className="absolute right-0 mt-2 w-36 bg-white text-black rounded-lg shadow-xl border animate-fadeInDown z-50">
+                <div className="absolute right-0 mt-2 w-36 bg-white text-black rounded-lg shadow-xl border z-50 animate-fadeInDown">
                   {languages.map(({ code, name, flag }) => (
                     <button
                       key={code}
@@ -184,7 +148,7 @@ export default function Navbar({ isTransparent = false }) {
               )}
             </div>
 
-            {/* Profile */}
+            {/* Profile dropdown */}
             <div className="relative">
               <button onClick={() => setDropdownOpen(!dropdownOpen)}>
                 <img
@@ -195,52 +159,47 @@ export default function Navbar({ isTransparent = false }) {
               </button>
 
               {dropdownOpen && (
-                <div className="absolute right-0 mt-2 w-48 bg-white text-black rounded-lg shadow-xl border animate-fadeInDown z-50">
+                <div className="absolute right-0 mt-2 w-48 bg-white text-black rounded-lg shadow-xl border z-50 animate-fadeInDown">
 
-                  {/* 🆕 Admin Link */}
                   {isAdmin && (
                     <Link
                       to="/admin"
                       onClick={() => setDropdownOpen(false)}
-                      className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100 border-b border-gray-100 font-semibold text-blue-600"
+                      className="flex gap-2 items-center px-4 py-2 text-blue-600 font-semibold hover:bg-gray-100 border-b"
                     >
-                      <Shield size={16} />
-                      Admin Panel
+                      <Shield size={16} /> Admin Panel
                     </Link>
                   )}
 
                   <Link
                     to="/profile"
                     onClick={() => setDropdownOpen(false)}
-                    className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100"
+                    className="flex gap-2 items-center px-4 py-2 hover:bg-gray-100"
                   >
-                    <User size={16} />
-                    {t("profile")}
+                    <User size={16} /> {t("profile")}
                   </Link>
 
                   <button
                     onClick={handleLogout}
                     className="w-full text-left flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-gray-100"
                   >
-                    <X size={16} />
-                    {t("logout")}
+                    <X size={16} /> {t("logout")}
                   </button>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Mobile menu button */}
-          <button onClick={() => setMobileMenu(!mobileMenu)} className="md:hidden p-2">
+          {/* MOBILE MENU BUTTON */}
+          <button onClick={() => setMobileMenu(!mobileMenu)} className="md:hidden p-2 text-white">
             {mobileMenu ? <X size={24} /> : <Menu size={24} />}
           </button>
         </div>
 
-        {/* Mobile menu */}
+        {/* MOBILE MENU DROPDOWN */}
         {mobileMenu && (
           <div className="md:hidden bg-blue-900/95 px-5 py-4 space-y-3 animate-fadeInDown">
 
-            {/* 🆕 Admin Link */}
             {isAdmin && (
               <Link
                 to="/admin"
@@ -255,12 +214,7 @@ export default function Navbar({ isTransparent = false }) {
             <Link to="/items" onClick={() => setMobileMenu(false)} className="block py-2">
               {t("items")}
             </Link>
-            
-            {/* 🚫 REMOVED: Donate Link from Mobile Menu */}
-            {/* <Link to="/donate" onClick={() => setMobileMenu(false)} className="block py-2">
-              {t("donate")}
-            </Link> */}
-            
+
             <Link to="/myactivity" onClick={() => setMobileMenu(false)} className="block py-2">
               {t("My Activity")}
             </Link>
@@ -271,7 +225,7 @@ export default function Navbar({ isTransparent = false }) {
               {t("profile")}
             </Link>
 
-            <button onClick={handleLogout} className="text-red-300 block py-2">
+            <button onClick={handleLogout} className="block py-2 text-red-300">
               {t("logout")}
             </button>
 
@@ -290,25 +244,28 @@ export default function Navbar({ isTransparent = false }) {
         )}
       </nav>
 
-      {/* BOTTOM MOBILE NAV - UPDATED: Removed Donate Button */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-blue-900/95 backdrop-blur border-t border-blue-800/40 text-white flex justify-around items-center py-2 z-40">
-        <Link to="/items" className={`flex flex-col items-center text-xs ${currentPath === "/items" && "text-blue-300"}`}>
+      {/* BOTTOM NAV (MOBILE) */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-blue-900/95 border-t border-blue-800/40 text-white flex justify-around items-center py-2 z-40">
+        <Link
+          to="/items"
+          className={`flex flex-col items-center text-xs ${currentPath === "/items" && "text-blue-300"}`}
+        >
           <Home size={20} />
           <span>{t("Items")}</span>
         </Link>
 
-        {/* 🚫 REMOVED: Donate Button from Bottom Mobile Nav */}
-        {/* <Link to="/donate" className={`flex flex-col items-center text-xs ${currentPath === "/donate" && "text-blue-300"}`}>
-          <PlusCircle size={22} />
-          <span>{t("Donate")}</span>
-        </Link> */}
-
-        <Link to="/myactivity" className={`flex flex-col items-center text-xs ${currentPath === "/myactivity" && "text-blue-300"}`}>
+        <Link
+          to="/myactivity"
+          className={`flex flex-col items-center text-xs ${currentPath === "/myactivity" && "text-blue-300"}`}
+        >
           <Package size={20} />
           <span>{t("Activity")}</span>
         </Link>
 
-        <Link to="/profile" className={`flex flex-col items-center text-xs ${currentPath === "/profile" && "text-blue-300"}`}>
+        <Link
+          to="/profile"
+          className={`flex flex-col items-center text-xs ${currentPath === "/profile" && "text-blue-300"}`}
+        >
           <User size={20} />
           <span>{t("Profile")}</span>
         </Link>
@@ -316,11 +273,11 @@ export default function Navbar({ isTransparent = false }) {
 
       <style>{`
         @keyframes fadeInDown {
-          from { opacity: 0; transform: translateY(-8px); }
+          from { opacity: 0; transform: translateY(-10px); }
           to { opacity: 1; transform: translateY(0); }
         }
         .animate-fadeInDown {
-          animation: fadeInDown .25s ease-out;
+          animation: fadeInDown .3s ease-out;
         }
       `}</style>
     </>

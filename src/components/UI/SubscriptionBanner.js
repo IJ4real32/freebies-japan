@@ -50,22 +50,13 @@ export default function SubscriptionBanner() {
     return () => unsub();
   }, [currentUser?.uid]);
 
+ 
   /* ------------------------------------------------------------------
-   * 🧭 Scroll hide / show logic
-   * ------------------------------------------------------------------ */
-  useEffect(() => {
-    const handleScroll = () => {
-      const current = window.scrollY;
-      if (current > lastScroll.current && current > 120) {
-        setHidden(true);
-      } else {
-        setHidden(false);
-      }
-      lastScroll.current = current;
-    };
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
+ * 🚫 Scroll hiding disabled — banner stays visible always
+ * ------------------------------------------------------------------ */
+useEffect(() => {
+  setHidden(false); // always visible
+}, []);
 
   /* ------------------------------------------------------------------
    * ♻️ Reset banner when user navigates to /items
