@@ -72,41 +72,76 @@ export default function MyActivity() {
 
     try {
       // Requests listener
-      unsubRequests = onSnapshot(
-        query(collection(db, "requests"), where("userId", "==", currentUser.uid)),
-        async (snap) => {
-          console.log("📥 Requests updated:", snap.size);
-          const arr = [];
-          
-          for (const docSnap of snap.docs) {
-            const r = docSnap.data();
-            // Fetch donation data for delivery estimates
-            let itemData = null;
-            if (r.itemId && r.status !== 'deleted') {
-              try {
-                const donationSnap = await getDoc(doc(db, "donations", r.itemId));
-                if (donationSnap.exists()) {
-                  itemData = donationSnap.data();
-                }
-              } catch (error) {
-                console.error("Error fetching donation data:", error);
-              }
-            }
-            arr.push({
-  id: docSnap.id,
-  ...r,
-  itemData: itemData,
-  userEmail: r.userEmail || currentUser.email || null,  // ⭐ REQUIRED ⭐
-});
-          }
-          setRequests(arr);
-        },
-        (error) => {
-          console.error("❌ Requests listener error:", error);
-          toast.error("Failed to load requests");
-        }
-      );
+      // Requests listener - NOW MERGED WITH deliveryDetails SOURCE OF TRUTH
+unsubRequests = onSnapshot(
+  query(collection(db, "requests"), where("userId", "==", currentUser.uid)),
+  async (snap) => {
+    console.log("📥 Requests updated:", snap.size);
+    const arr = [];
 
+    for (const docSnap of snap.docs) {
+      const r = docSnap.data();
+      const requestId = docSnap.id;
+
+      // ---------------------------
+      // 1️⃣ Pull deliveryDetails (NEW PRIMARY SOURCE)
+      // ---------------------------
+      let delivery = null;
+      try {
+        const dSnap = await getDoc(doc(db, "deliveryDetails", requestId));
+        if (dSnap.exists()) delivery = dSnap.data();
+      } catch (err) {
+        console.error("❌ Error loading deliveryDetails:", err);
+      }
+
+      // ---------------------------
+      // 2️⃣ Fetch donation for title/image only (NO STATUS FROM HERE)
+      // ---------------------------
+      let itemData = null;
+      if (r.itemId) {
+        try {
+          const donationSnap = await getDoc(doc(db, "donations", r.itemId));
+          if (donationSnap.exists()) itemData = donationSnap.data();
+        } catch (err) {
+          console.error("❌ Donation fetch failed:", err);
+        }
+      }
+
+      // ---------------------------
+      // 3️⃣ MERGE — deliveryDetails overrides request data
+      // ---------------------------
+      arr.push({
+        id: requestId,
+        ...r,
+        itemData,
+
+        // 🔥 ALWAYS trust deliveryDetails > request > default
+        deliveryStatus: delivery?.deliveryStatus || r.deliveryStatus || "pending",
+        status: delivery?.status || r.status || "pending",
+
+        // 🔥 Address Fields
+        deliveryAddress: delivery?.deliveryAddress || r.deliveryAddress || null,
+        deliveryPhone: delivery?.deliveryPhone || r.deliveryPhone || null,
+        deliveryInstructions: delivery?.deliveryInstructions || r.deliveryInstructions || null,
+
+        // 🔥 Timestamps
+        awardAcceptedAt: delivery?.createdAt || r.awardAcceptedAt || null,
+        updatedAt: delivery?.updatedAt || r.updatedAt || null,
+
+        // Email fallback
+        userEmail: r.userEmail || currentUser.email || null,
+      });
+    }
+
+    setRequests(arr);
+  },
+  (error) => {
+    console.error("❌ Requests listener error:", error);
+    toast.error("Failed to load requests");
+  }
+);
+
+       
       // Deposits listener
       unsubDeposits = onSnapshot(
         query(collection(db, "deposits"), where("userId", "==", currentUser.uid)),

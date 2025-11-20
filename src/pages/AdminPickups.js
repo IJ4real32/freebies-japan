@@ -214,39 +214,38 @@ export default function AdminPickups() {
   };
 
   // Update delivery status
-  const handleUpdateDelivery = async (req, newStatus) => {
-    if (!window.confirm(`Set status to "${newStatus}"?`)) return;
+ const handleUpdateDelivery = async (req, newStatus) => {
+  if (!window.confirm(`Set status to "${newStatus}"?`)) return;
 
-    setUpdating((p) => ({ ...p, [req.id]: true }));
+  setUpdating((p) => ({ ...p, [req.id]: true }));
 
-    try {
-      const updates = {
-        updatedAt: new Date(),
-        deliveryStatus: newStatus,
-        status: newStatus === "delivered" ? "completed" : req.status,
-      };
+  try {
+    const updates = {
+      deliveryStatus: newStatus,
+      updatedAt: new Date(),
+    };
 
-      await updateDoc(doc(db, "deliveryDetails", req.id), updates);
+    await updateDoc(doc(db, "deliveryDetails", req.id), updates);
 
-      try {
-        await updateDoc(doc(db, "requests", req.id), updates);
-      } catch {}
+    // Mirror to request (optional but recommended)
+    await updateDoc(doc(db, "requests", req.id), updates);
 
-      await sendStatusNotification(
-        req.userEmail,
-        newStatus,
-        req.itemData?.title,
-        "delivery_update"
-      );
+    await sendStatusNotification(
+      req.userEmail,
+      newStatus,
+      req.itemData?.title,
+      "delivery_update"
+    );
 
-      toast.success("Delivery updated");
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to update");
-    }
+    toast.success("Delivery status updated");
+  } catch (err) {
+    console.error(err);
+    toast.error("Failed to update");
+  }
 
-    setUpdating((p) => ({ ...p, [req.id]: false }));
-  };
+  setUpdating((p) => ({ ...p, [req.id]: false }));
+};
+
 
   // Update pickup
   const handleUpdatePickup = async (pickup, newStatus) => {
@@ -270,36 +269,60 @@ export default function AdminPickups() {
   };
 
   // Filter + search + sort
-  const filteredData = useMemo(() => {
-    const source = activeView === "pickups" ? pickups : requests;
-    let filtered = source;
+ const filteredData = useMemo(() => {
+  const src = activeView === "pickups" ? pickups : requests;
 
-    if (filter) {
-      if (activeView === "pickups") {
-        filtered = filtered.filter((p) => p.status === filter);
-      } else {
-        filtered = filtered.filter(
-          (r) =>
-            (filter === "accepted" && r.status === "accepted") ||
-            (filter === "scheduled" && r.deliveryStatus === "pickup_scheduled") ||
-            (filter === "delivered" && r.deliveryStatus === "delivered")
-        );
-      }
-    }
+  // ❌ Hide completed deliveries
+  let list = src.filter(
+    (i) => i.deliveryStatus !== "completed" && i.status !== "completed"
+  );
 
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      filtered = filtered.filter(
-        (i) =>
-          i?.userEmail?.toLowerCase().includes(s) ||
-          i?.deliveryAddress?.toLowerCase().includes(s) ||
-          i?.deliveryPhone?.toLowerCase().includes(s) ||
-          i?.itemData?.title?.toLowerCase().includes(s)
+  if (filter) {
+    list = list.filter((i) => {
+      return (
+        i.deliveryStatus === filter ||
+        i.status === filter
       );
-    }
+    });
+  }
 
-    return filtered;
-  }, [requests, pickups, search, filter, activeView]);
+  if (search.trim()) {
+    const s = search.toLowerCase();
+    list = list.filter(
+      (i) =>
+        i.userEmail?.toLowerCase().includes(s) ||
+        i.deliveryAddress?.toLowerCase().includes(s) ||
+        i.deliveryPhone?.toLowerCase().includes(s) ||
+        i.itemData?.title?.toLowerCase().includes(s)
+    );
+  }
+
+  return list;
+}, [requests, pickups, filter, search, activeView]);
+
+
+// ADD HERE
+const copyToClipboard = (text) => {
+  if (!text) return;
+  navigator.clipboard.writeText(text);
+  toast.success("Copied to clipboard!");
+};
+
+const getDeliveryStatusColor = (status) => {
+  switch (status) {
+    case "accepted":
+      return "bg-blue-100 text-blue-700";
+    case "pickup_scheduled":
+      return "bg-orange-100 text-orange-700";
+    case "delivered":
+    case "completed":
+      return "bg-green-100 text-green-700";
+    case "cancelled":
+      return "bg-red-100 text-red-700";
+    default:
+      return "bg-gray-100 text-gray-700";
+  }
+};
 
   // UI RENDER
   if (loading)
@@ -493,6 +516,8 @@ export default function AdminPickups() {
                           updating={updating[item.id]}
                           formatDate={formatDate}
                           formatTimeAgo={formatTimeAgo}
+                          copyToClipboard={copyToClipboard}   
+                          getStatusColor={getDeliveryStatusColor}
                         />
                       )}
                     </div>
@@ -517,7 +542,10 @@ const DeliveryItem = ({
   updating,
   formatDate,
   formatTimeAgo,
+  copyToClipboard,          // ← ADD THIS
+  getStatusColor,           // ← ADD THIS
 }) => {
+
   return (
     <>
       <div className="flex-1">
@@ -528,24 +556,54 @@ const DeliveryItem = ({
           </span>
         </p>
 
-        <div className="mt-2 text-sm text-gray-600 space-y-1">
+        <div className="mt-2 text-sm text-gray-600 space-y-2">
+
+          {/* USER EMAIL */}
           <p className="flex items-center gap-1">
             <User size={14} />
             <b>{request.userEmail}</b>
           </p>
 
-          <p className="flex items-center gap-1">
-            <MapPin size={14} /> {request.deliveryAddress}
-          </p>
+          {/* ✅ PATCHED: FULL MULTILINE ADDRESS + COPY BUTTON */}
+          <div className="flex items-start gap-2">
+            <MapPin size={14} className="mt-1 text-gray-500" />
+            <div className="flex flex-col">
+              <span
+                onClick={() => copyToClipboard(request.deliveryAddress)}
+                className="cursor-pointer whitespace-pre-wrap break-words leading-relaxed hover:text-indigo-600"
+                title="Click to copy full address"
+              >
+                {request.deliveryAddress}
+              </span>
 
-          <p className="flex items-center gap-1">
-            <Phone size={14} /> {request.deliveryPhone}
-          </p>
+              <button
+                onClick={() => copyToClipboard(request.deliveryAddress)}
+                className="mt-1 text-xs text-indigo-600 underline w-fit"
+              >
+                Copy Address
+              </button>
+            </div>
+          </div>
 
+          {/* PHONE */}
+          <div className="flex items-start gap-2">
+            <Phone size={14} className="mt-1 text-gray-500" />
+            <span
+              onClick={() => copyToClipboard(request.deliveryPhone)}
+              className="cursor-pointer hover:text-indigo-600"
+            >
+              {request.deliveryPhone}
+            </span>
+          </div>
+
+          {/* INSTRUCTIONS */}
           {request.deliveryInstructions && (
-            <p className="flex items-center gap-1">
-              <MessageSquare size={14} /> {request.deliveryInstructions}
-            </p>
+            <div className="flex items-start gap-2">
+              <MessageSquare size={14} className="mt-1 text-gray-500" />
+              <span className="whitespace-pre-wrap break-words leading-relaxed">
+                {request.deliveryInstructions}
+              </span>
+            </div>
           )}
         </div>
 
@@ -574,26 +632,50 @@ const DeliveryItem = ({
         <StatusBadge status={request.deliveryStatus} />
 
         {/* Schedule */}
-        {request.deliveryStatus === "accepted" && (
-          <button
-            disabled={updating}
-            onClick={() => onUpdate(request, "pickup_scheduled")}
-            className="px-3 py-1 bg-orange-600 text-xs text-white rounded-full"
-          >
-            Schedule
-          </button>
-        )}
+       {/* 📦 User accepted → Admin must schedule pickup */}
+{request.deliveryStatus === "accepted" && (
+  <button
+    disabled={updating}
+    onClick={() => onUpdate(request, "pickup_scheduled")}
+    className="px-3 py-1 bg-orange-600 text-xs text-white rounded-full"
+  >
+    Schedule Pickup
+  </button>
+)}
 
-        {/* Deliver */}
-        {["pickup_scheduled", "accepted"].includes(request.deliveryStatus) && (
-          <button
-            disabled={updating}
-            onClick={() => onUpdate(request, "delivered")}
-            className="px-3 py-1 bg-green-600 text-xs text-white rounded-full"
-          >
-            Deliver
-          </button>
-        )}
+{/* 🚚 After pickup scheduled → Admin marks as in transit */}
+{request.deliveryStatus === "pickup_scheduled" && (
+  <button
+    disabled={updating}
+    onClick={() => onUpdate(request, "in_transit")}
+    className="px-3 py-1 bg-purple-600 text-xs text-white rounded-full"
+  >
+    Out for Delivery
+  </button>
+)}
+
+{/* 🎁 After in_transit → Admin marks delivered */}
+{request.deliveryStatus === "in_transit" && (
+  <button
+    disabled={updating}
+    onClick={() => onUpdate(request, "delivered")}
+    className="px-3 py-1 bg-green-600 text-xs text-white rounded-full"
+  >
+    Mark Delivered
+  </button>
+)}
+
+{/* 🏁 Delivered → Admin marks complete */}
+{request.deliveryStatus === "delivered" && (
+  <button
+    disabled={updating}
+    onClick={() => onUpdate(request, "completed")}
+    className="px-3 py-1 bg-blue-600 text-xs text-white rounded-full"
+  >
+    Complete
+  </button>
+)}
+
       </div>
     </>
   );
@@ -665,13 +747,15 @@ const PickupItem = ({
 
 const StatusBadge = ({ status }) => {
   const colors = {
-    accepted: "bg-blue-100 text-blue-700",
-    pickup_scheduled: "bg-orange-100 text-orange-700",
-    delivered: "bg-green-100 text-green-700",
-    completed: "bg-green-100 text-green-700",
-    cancelled: "bg-red-100 text-red-700",
-    scheduled: "bg-yellow-100 text-yellow-700",
-  };
+  accepted: "bg-blue-100 text-blue-700",
+  pickup_scheduled: "bg-orange-100 text-orange-700",
+  in_transit: "bg-purple-100 text-purple-700",
+  delivered: "bg-green-100 text-green-700",
+  completed: "bg-green-200 text-green-800",
+  cancelled: "bg-red-100 text-red-700",
+  scheduled: "bg-yellow-100 text-yellow-700",
+};
+
 
   return (
     <span
