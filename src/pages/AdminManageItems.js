@@ -17,7 +17,6 @@ import { sendAdminItemStatusEmail } from "../services/functionsApi";
 import toast from "react-hot-toast";
 import { checkAdminStatus } from "../utils/adminUtils";
 
-
 import {
   Plus, RefreshCcw, CheckCircle, XCircle, Trash2,
   Mail, MapPin, User, Search, Filter, Menu, X,
@@ -35,22 +34,84 @@ export default function AdminManageItems() {
   const navigate = useNavigate();
 
   /* --------------------------------------------------------
-   * 🔄 Real-time Items Stream WITH DESCENDING ORDER
+   * 🎯 STATUS CONFIGURATION & NORMALIZATION
+   * -------------------------------------------------------- */
+  const statusColors = {
+    active: "bg-blue-100 text-blue-800",
+    awarded: "bg-purple-100 text-purple-800",
+    expired: "bg-red-100 text-red-800",
+    requestClosed: "bg-gray-300 text-gray-800",
+  };
+
+  const premiumStatusColors = {
+    available: "bg-green-100 text-green-800",
+    depositPaid: "bg-yellow-100 text-yellow-800",
+    preparingDelivery: "bg-blue-100 text-blue-800",
+    inTransit: "bg-purple-100 text-purple-800",
+    delivered: "bg-indigo-100 text-indigo-800",
+    sold: "bg-gray-100 text-gray-800",
+  };
+
+  // Data normalization function
+  const normalizeItemData = (item) => {
+    const normalized = { ...item };
+    
+    // Normalize legacy status values for free items
+    if (item.type !== "premium") {
+      if (!item.status || item.status === "sponsored" || item.status === "") {
+        normalized.status = "active";
+      }
+    }
+    
+    // Normalize premiumStatus for premium items
+    if (item.type === "premium") {
+      if (!item.premiumStatus || item.premiumStatus === "") {
+        normalized.premiumStatus = "available";
+      }
+    }
+    
+    return normalized;
+  };
+
+  /* --------------------------------------------------------
+   * 🔄 Real-time Items Stream WITH DATA NORMALIZATION
    * -------------------------------------------------------- */
   useEffect(() => {
-    // ✅ FIXED: Query with descending order by createdAt
     const q = query(
       collection(db, "donations"),
-      orderBy("createdAt", "desc") // Most recent first
+      orderBy("createdAt", "desc")
     );
     
     const unsub = onSnapshot(q, async (snap) => {
       try {
         const list = await Promise.all(
           snap.docs.map(async (d) => {
-            const data = d.data();
+            let data = d.data();
+            
+            // ✅ Apply data normalization
+            data = normalizeItemData(data);
+            
+            // Update document if normalization changed anything
+            const originalData = d.data();
+            const needsUpdate = 
+              (data.type !== "premium" && data.status !== originalData.status) ||
+              (data.type === "premium" && data.premiumStatus !== originalData.premiumStatus);
+              
+            if (needsUpdate) {
+              try {
+                await updateDoc(doc(db, "donations", d.id), {
+                  ...(data.type !== "premium" && { status: data.status }),
+                  ...(data.type === "premium" && { premiumStatus: data.premiumStatus }),
+                  updatedAt: new Date()
+                });
+              } catch (updateErr) {
+                console.warn("Could not auto-update legacy data:", updateErr);
+              }
+            }
+            
             const reqQ = query(collection(db, "requests"), where("itemId", "==", d.id));
             const reqCount = await getCountFromServer(reqQ);
+            
             return { 
               id: d.id, 
               ...data, 
@@ -68,13 +129,6 @@ export default function AdminManageItems() {
     });
     return () => unsub();
   }, []);
-
-  const statusColors = {
-    active: "bg-blue-100 text-blue-800",
-    awarded: "bg-purple-100 text-purple-800",
-    closed: "bg-gray-200 text-gray-600",
-    delivered: "bg-green-100 text-green-800",
-  };
 
   /* --------------------------------------------------------
    * ♻️ Relist Donation (48h)
@@ -96,12 +150,53 @@ export default function AdminManageItems() {
   };
 
   /* --------------------------------------------------------
+   * 🔄 Update Item Status (FREE ITEMS)
+   * -------------------------------------------------------- */
+  const handleStatusChange = async (item, newStatus) => {
+    setBusy((p) => ({ ...p, [item.id]: "status" }));
+    try {
+      await updateDoc(doc(db, "donations", item.id), { 
+        status: newStatus,
+        updatedAt: new Date()
+      });
+      toast.success(`Status updated to "${newStatus}"`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update status");
+    } finally {
+      setBusy((p) => ({ ...p, [item.id]: null }));
+    }
+  };
+
+  /* --------------------------------------------------------
+   * 🚀 Update PREMIUM STATUS (PREMIUM ITEMS)
+   * -------------------------------------------------------- */
+  const handlePremiumStatusChange = async (item, newStatus) => {
+    setBusy((p) => ({ ...p, [item.id]: "premiumStatus" }));
+    try {
+      await updateDoc(doc(db, "donations", item.id), {
+        premiumStatus: newStatus,
+        updatedAt: new Date(),
+      });
+      toast.success(`Premium status updated to "${newStatus}"`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update premium status");
+    } finally {
+      setBusy((p) => ({ ...p, [item.id]: null }));
+    }
+  };
+
+  /* --------------------------------------------------------
    * ✅ Verify / Unverify
    * -------------------------------------------------------- */
   const handleVerify = async (item, flag = true) => {
     setBusy((p) => ({ ...p, [item.id]: "verify" }));
     try {
-      await updateDoc(doc(db, "donations", item.id), { verified: flag });
+      await updateDoc(doc(db, "donations", item.id), { 
+        verified: flag,
+        updatedAt: new Date()
+      });
       if (flag)
         await sendAdminItemStatusEmail(item.ownerEmail, "Item Verified", item.title);
       toast.success(flag ? "✅ Verified" : "❌ Unverified");
@@ -350,114 +445,161 @@ export default function AdminManageItems() {
             )}
 
             {!loading &&
-              filtered.map((item) => (
-                <div
-                  key={item.id}
-                  className="border rounded-lg p-5 mb-6 bg-white shadow-sm hover:shadow-md transition relative"
-                >
-                  {/* Item top tags */}
-                  <div className="absolute top-3 right-3 flex flex-wrap gap-1">
-                    {item.verified && (
-                      <span className="text-xs bg-green-600 text-white px-2 py-1 rounded-full">
-                        ✅ Verified
-                      </span>
-                    )}
-                    <span
-                      className={`text-xs px-2 py-1 rounded-full ${
-                        item.type === "premium"
-                          ? "bg-purple-600 text-white"
-                          : "bg-emerald-600 text-white"
-                      }`}
-                    >
-                      {item.type === "premium" ? "Premium" : "Free"}
-                    </span>
-                  </div>
-
-                  <div className="flex gap-5">
-                    <img
-                      src={item.images?.[0] || "/default-item.jpg"}
-                      alt="Item"
-                      className="w-28 h-28 object-cover rounded border"
-                    />
-                    <div className="flex-1">
-                      <h2 className="text-lg font-semibold mb-1">{item.title}</h2>
-                      <p className="text-sm text-gray-600 mb-2">
-                        {item.description || "No description provided."}
-                      </p>
-                      
-                      {/* Time Information */}
-                      <div className="flex items-center gap-4 text-xs text-gray-500 mb-3">
-                        <div className="flex items-center gap-1">
-                          <Clock size={12} />
-                          <span>Created: {formatDate(item.createdAt)}</span>
-                          <span className="text-gray-400 ml-1">({formatTimeAgo(item.createdAt)})</span>
-                        </div>
-                        {item.updatedAt && (
-                          <div className="flex items-center gap-1">
-                            <span>Updated: {formatDate(item.updatedAt)}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="text-sm text-gray-600 space-y-1">
-                        {item.ownerEmail && (
-                          <div className="flex items-center gap-1">
-                            <Mail size={14} /> {item.ownerEmail}
-                          </div>
-                        )}
-                        {item.ownerId && (
-                          <div className="flex items-center gap-1">
-                            <User size={14} /> ID: {item.ownerId}
-                          </div>
-                        )}
-                        {item.delivery && (
-                          <div className="flex items-center gap-1">
-                            <MapPin size={14} />{" "}
-                            {item.delivery === "pickup"
-                              ? `Pickup at: ${item.pickupLocation || "N/A"}`
-                              : "Delivery"}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="mt-3 text-xs text-gray-500">
-                        Requests: {item.requestsCount || 0} | Status:{" "}
-                        <span
-                          className={`px-2 py-0.5 rounded ${
-                            statusColors[item.status] || "bg-gray-100 text-gray-800"
-                          }`}
-                        >
-                          {item.status || "pending"}
+              filtered.map((item) => {
+                const normalizedItem = normalizeItemData(item);
+                
+                return (
+                  <div
+                    key={normalizedItem.id}
+                    className="border rounded-lg p-5 mb-6 bg-white shadow-sm hover:shadow-md transition relative"
+                  >
+                    {/* Item top tags */}
+                    <div className="absolute top-3 right-3 flex flex-wrap gap-1">
+                      {normalizedItem.verified && (
+                        <span className="text-xs bg-green-600 text-white px-2 py-1 rounded-full">
+                          ✅ Verified
                         </span>
+                      )}
+                      <span
+                        className={`text-xs px-2 py-1 rounded-full ${
+                          normalizedItem.type === "premium"
+                            ? "bg-purple-600 text-white"
+                            : "bg-emerald-600 text-white"
+                        }`}
+                      >
+                        {normalizedItem.type === "premium" ? "Premium" : "Free"}
+                      </span>
+                    </div>
+
+                    <div className="flex gap-5">
+                      <img
+                        src={normalizedItem.images?.[0] || "/default-item.jpg"}
+                        alt="Item"
+                        className="w-28 h-28 object-cover rounded border"
+                      />
+                      <div className="flex-1">
+                        <h2 className="text-lg font-semibold mb-1">{normalizedItem.title}</h2>
+                        <p className="text-sm text-gray-600 mb-2">
+                          {normalizedItem.description || "No description provided."}
+                        </p>
+                        
+                        {/* Time Information */}
+                        <div className="flex items-center gap-4 text-xs text-gray-500 mb-3">
+                          <div className="flex items-center gap-1">
+                            <Clock size={12} />
+                            <span>Created: {formatDate(normalizedItem.createdAt)}</span>
+                            <span className="text-gray-400 ml-1">({formatTimeAgo(normalizedItem.createdAt)})</span>
+                          </div>
+                          {normalizedItem.updatedAt && (
+                            <div className="flex items-center gap-1">
+                              <span>Updated: {formatDate(normalizedItem.updatedAt)}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="text-sm text-gray-600 space-y-1">
+                          {normalizedItem.ownerEmail && (
+                            <div className="flex items-center gap-1">
+                              <Mail size={14} /> {normalizedItem.ownerEmail}
+                            </div>
+                          )}
+                          {normalizedItem.ownerId && (
+                            <div className="flex items-center gap-1">
+                              <User size={14} /> ID: {normalizedItem.ownerId}
+                            </div>
+                          )}
+                          {normalizedItem.delivery && (
+                            <div className="flex items-center gap-1">
+                              <MapPin size={14} />{" "}
+                              {normalizedItem.delivery === "pickup"
+                                ? `Pickup at: ${normalizedItem.pickupLocation || "N/A"}`
+                                : "Delivery"}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* STATUS MANAGEMENT SECTION */}
+                        <div className="mt-3 text-xs text-gray-500 flex flex-wrap items-center gap-2">
+                          <span>Requests: {normalizedItem.requestsCount || 0}</span>
+                          
+                          {/* FREE ITEM STATUS */}
+                          {normalizedItem.type !== "premium" && (
+                            <>
+                              <span
+                                className={`px-2 py-0.5 rounded ${statusColors[normalizedItem.status] || "bg-gray-200 text-gray-800"}`}
+                              >
+                                {normalizedItem.status || "active"}
+                              </span>
+                              <select
+                                className="border px-2 py-1 rounded text-xs"
+                                value={normalizedItem.status || "active"}
+                                onChange={(e) => handleStatusChange(normalizedItem, e.target.value)}
+                                disabled={busy[normalizedItem.id] === "status"}
+                              >
+                                <option value="active">Active</option>
+                                <option value="awarded">Awarded</option>
+                                <option value="expired">Expired</option>
+                                <option value="requestClosed">Request Closed</option>
+                              </select>
+                            </>
+                          )}
+                          
+                          {/* PREMIUM ITEM STATUS */}
+                          {normalizedItem.type === "premium" && (
+                            <>
+                              <span
+                                className={`px-2 py-0.5 rounded ${premiumStatusColors[normalizedItem.premiumStatus] || "bg-gray-200 text-gray-800"}`}
+                              >
+                                Premium: {normalizedItem.premiumStatus || "available"}
+                              </span>
+                              <select
+                                className="border px-2 py-1 rounded text-xs"
+                                value={normalizedItem.premiumStatus || "available"}
+                                onChange={(e) => handlePremiumStatusChange(normalizedItem, e.target.value)}
+                                disabled={busy[normalizedItem.id] === "premiumStatus"}
+                              >
+                                <option value="available">Available</option>
+                                <option value="depositPaid">Deposit Paid</option>
+                                <option value="preparingDelivery">Preparing Delivery</option>
+                                <option value="inTransit">In Transit</option>
+                                <option value="delivered">Delivered</option>
+                                <option value="sold">Sold</option>
+                              </select>
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="mt-4 flex flex-wrap gap-3 justify-end">
-                    <AdminButton
-                      icon={RefreshCcw}
-                      label="Reopen"
-                      onClick={() => handleRelist(item)}
-                      busy={busy[item.id] === "relist"}
-                      color="blue"
-                    />
-                    <AdminButton
-                      icon={item.verified ? XCircle : CheckCircle}
-                      label={item.verified ? "Unverify" : "Verify"}
-                      onClick={() => handleVerify(item, !item.verified)}
-                      busy={busy[item.id] === "verify"}
-                      color={item.verified ? "yellow" : "green"}
-                    />
-                    <AdminButton
-                      icon={Trash2}
-                      label="Delete"
-                      onClick={() => handleDelete(item)}
-                      busy={busy[item.id] === "delete"}
-                      color="red"
-                    />
+                    <div className="mt-4 flex flex-wrap gap-3 justify-end">
+                      {/* Only show Reopen for free items */}
+                      {normalizedItem.type !== "premium" && (
+                        <AdminButton
+                          icon={RefreshCcw}
+                          label="Reopen"
+                          onClick={() => handleRelist(normalizedItem)}
+                          busy={busy[normalizedItem.id] === "relist"}
+                          color="blue"
+                        />
+                      )}
+                      <AdminButton
+                        icon={normalizedItem.verified ? XCircle : CheckCircle}
+                        label={normalizedItem.verified ? "Unverify" : "Verify"}
+                        onClick={() => handleVerify(normalizedItem, !normalizedItem.verified)}
+                        busy={busy[normalizedItem.id] === "verify"}
+                        color={normalizedItem.verified ? "yellow" : "green"}
+                      />
+                      <AdminButton
+                        icon={Trash2}
+                        label="Delete"
+                        onClick={() => handleDelete(normalizedItem)}
+                        busy={busy[normalizedItem.id] === "delete"}
+                        color="red"
+                      />
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
           </div>
         </section>
       </main>

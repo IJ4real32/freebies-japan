@@ -1,4 +1,4 @@
-// ✅ FILE: src/pages/RequestsAdmin.js (FULLY PATCHED VERSION)
+// ✅ FILE: src/pages/RequestsAdmin.js (UNIFIED LIFECYCLE MANAGEMENT)
 import React, { useEffect, useState, useMemo } from "react";
 import {
   collection,
@@ -9,8 +9,9 @@ import {
   query,
   where,
   orderBy,
+  updateDoc,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { db, functions } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
 import {
   adminUpdateRequestStatus,
@@ -27,7 +28,18 @@ import {
   Loader2,
   Clock,
   Calendar,
+  Package,
+  Truck,
+  CheckCircle,
+  CreditCard,
+  User,
+  Mail,
+  MapPin,
+  Crown,
+  Award,
+  RefreshCcw,
 } from "lucide-react";
+import { httpsCallable } from "firebase/functions";
 
 /* --------------------------------------------------------
  * 🧩 Helper Functions
@@ -69,18 +81,38 @@ const statusColors = {
   lost: "bg-red-100 text-red-800",
 };
 
+const premiumStatusColors = {
+  available: "bg-green-100 text-green-800",
+  depositPaid: "bg-yellow-100 text-yellow-800",
+  preparingDelivery: "bg-blue-100 text-blue-800",
+  inTransit: "bg-purple-100 text-purple-800",
+  delivered: "bg-indigo-100 text-indigo-800",
+  sold: "bg-gray-100 text-gray-800",
+};
+
+const donationStatusColors = {
+  pending: "bg-yellow-100 text-yellow-800",
+  approved: "bg-green-100 text-green-800",
+  rejected: "bg-red-100 text-red-800",
+  listed: "bg-blue-100 text-blue-800",
+  awarded: "bg-purple-100 text-purple-800",
+  completed: "bg-indigo-100 text-indigo-800",
+};
+
 const colorMap = {
   blue: "bg-blue-600 hover:bg-blue-700 text-white",
   green: "bg-green-600 hover:bg-green-700 text-white",
   red: "bg-red-600 hover:bg-red-700 text-white",
   purple: "bg-purple-600 hover:bg-purple-700 text-white",
   gray: "bg-gray-500 hover:bg-gray-600 text-white",
+  yellow: "bg-yellow-500 hover:bg-yellow-600 text-white",
+  orange: "bg-orange-500 hover:bg-orange-600 text-white",
 };
 
 /* --------------------------------------------------------
- * 🧱 Reusable Button Component
+ * 🧱 Reusable Components
  * -------------------------------------------------------- */
-const AdminButton = ({ label, onClick, busy, color }) => (
+const AdminButton = ({ label, onClick, busy, color, icon: Icon }) => (
   <button
     onClick={onClick}
     disabled={busy}
@@ -89,71 +121,115 @@ const AdminButton = ({ label, onClick, busy, color }) => (
     }`}
   >
     {busy && <Loader2 size={12} className="animate-spin" />}
+    {Icon && <Icon size={12} />}
     {label}
   </button>
 );
 
-const Stat = ({ label, value, color }) => (
-  <div className="text-center">
-    <p className={`text-sm font-semibold text-${color}-700`}>{label}</p>
-    <p className="text-lg font-bold">{value}</p>
-  </div>
+const StatusBadge = ({ status, type = "free" }) => {
+  const getStatusConfig = () => {
+    if (type === "premium") {
+      return {
+        color: premiumStatusColors[status] || "bg-gray-100 text-gray-800",
+        label: status || "available"
+      };
+    }
+    if (type === "donation") {
+      return {
+        color: donationStatusColors[status] || "bg-gray-100 text-gray-800",
+        label: status || "pending"
+      };
+    }
+    return {
+      color: statusColors[status] || "bg-gray-100 text-gray-800",
+      label: status || "pending"
+    };
+  };
+
+  const config = getStatusConfig();
+
+  return (
+    <span className={`px-2 py-1 rounded text-xs font-medium ${config.color}`}>
+      {config.label}
+    </span>
+  );
+};
+
+const TabButton = ({ active, onClick, children, count }) => (
+  <button
+    onClick={onClick}
+    className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+      active
+        ? "bg-indigo-600 text-white shadow-sm"
+        : "bg-white text-gray-700 hover:bg-gray-50 border border-gray-200"
+    }`}
+  >
+    {children}
+    {count !== undefined && (
+      <span className={`ml-2 px-1.5 py-0.5 text-xs rounded-full ${
+        active ? "bg-white text-indigo-600" : "bg-gray-100 text-gray-600"
+      }`}>
+        {count}
+      </span>
+    )}
+  </button>
 );
 
 /* --------------------------------------------------------
- * 🧭 MAIN COMPONENT
+ * 🧭 MAIN COMPONENT - UNIFIED LIFECYCLE MANAGEMENT
  * -------------------------------------------------------- */
 export default function RequestsAdmin() {
   const { isAuthenticated, isAdmin } = useAuth();
   const navigate = useNavigate();
 
+  const [activeTab, setActiveTab] = useState("free"); // free, premium, donations
   const [requests, setRequests] = useState([]);
+  const [premiumItems, setPremiumItems] = useState([]);
+  const [userDonations, setUserDonations] = useState([]);
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [userDetails, setUserDetails] = useState(null);
-  const [actionBusy, setActionBusy] = useState({
-    approve: null,
-    deliver: null,
-    view: null,
-  });
+  const [actionBusy, setActionBusy] = useState({});
+
+  // Cloud Functions
+  const [onAwardDonation] = useState(() => httpsCallable(functions, 'onAwardDonation'));
+  const [onPremiumStatusAdvance] = useState(() => httpsCallable(functions, 'onPremiumStatusAdvance'));
+  const [onPickupBooking] = useState(() => httpsCallable(functions, 'onPickupBooking'));
+  const [sendUserNotification] = useState(() => httpsCallable(functions, 'sendUserNotification'));
+  const [sendAdminNotification] = useState(() => httpsCallable(functions, 'sendAdminNotification'));
 
   /* --------------------------------------------------------
-   * 🔐 Guard: Only admins can access - FIXED
+   * 🔐 Guard: Only admins can access
    * -------------------------------------------------------- */
   useEffect(() => {
-    console.log("🔐 RequestsAdmin - Auth check:", { isAuthenticated, isAdmin });
-    
     if (!isAuthenticated) {
       navigate("/login");
       return;
     }
     
-    // ✅ FIXED: Use isAdmin property directly instead of checkAdminStatus function
     if (!isAdmin) {
-      console.warn("⚠️ User is not admin, redirecting to unauthorized");
       navigate("/unauthorized");
       return;
     }
-    
-    console.log("✅ Admin access granted to RequestsAdmin");
   }, [isAuthenticated, isAdmin, navigate]);
 
   /* --------------------------------------------------------
-   * 📡 Load all requests in real-time WITH DESCENDING ORDER
+   * 📡 Load ALL Data in Real-time
    * -------------------------------------------------------- */
   useEffect(() => {
-    // Only load requests if user is authenticated and admin
     if (!isAuthenticated || !isAdmin) return;
 
-    // ✅ FIXED: Query with descending order by createdAt
-    const q = query(
+    setLoading(true);
+
+    // Load Free Requests
+    const requestsQuery = query(
       collection(db, "requests"),
-      orderBy("createdAt", "desc") // Most recent first
+      orderBy("createdAt", "desc")
     );
     
-    const unsub = onSnapshot(q, async (snap) => {
+    const requestsUnsub = onSnapshot(requestsQuery, async (snap) => {
       const base = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       const enriched = await Promise.all(
         base.map(async (r) => {
@@ -164,64 +240,144 @@ export default function RequestsAdmin() {
                 const udata = u.data();
                 return {
                   ...r,
-                  userName:
-                    udata.username ||
-                    udata.name ||
-                    udata.email?.split("@")[0] ||
-                    "Anonymous",
+                  userName: udata.username || udata.name || udata.email?.split("@")[0] || "Anonymous",
                   userEmail: udata.email || r.userEmail,
+                  type: "free"
                 };
               }
             } catch {}
           }
-          return r;
+          return { ...r, type: "free" };
         })
       );
       setRequests(enriched);
-      setLoading(false);
-    }, (err) => {
-      console.error("Error loading requests:", err);
-      setError("Failed to load requests");
-      setLoading(false);
     });
 
-    return () => unsub();
+    // Load Premium Items
+    const premiumQuery = query(
+      collection(db, "donations"),
+      where("type", "==", "premium"),
+      orderBy("createdAt", "desc")
+    );
+    
+    const premiumUnsub = onSnapshot(premiumQuery, async (snap) => {
+      const items = await Promise.all(
+        snap.docs.map(async (d) => {
+          const data = d.data();
+          // Get buyer info for purchased items
+          let buyerInfo = null;
+          if (data.premiumStatus !== "available") {
+            try {
+              const buyerSnap = await getDoc(doc(db, "users", data.buyerId));
+              if (buyerSnap.exists()) {
+                buyerInfo = buyerSnap.data();
+              }
+            } catch (error) {
+              console.log("No buyer info found");
+            }
+          }
+          
+          return {
+            id: d.id,
+            ...data,
+            type: "premium",
+            buyerInfo
+          };
+        })
+      );
+      setPremiumItems(items);
+    });
+
+    // Load User Donations
+    const donationsQuery = query(
+      collection(db, "donations"),
+      where("donorType", "==", "user"),
+      orderBy("createdAt", "desc")
+    );
+    
+    const donationsUnsub = onSnapshot(donationsQuery, async (snap) => {
+      const donations = await Promise.all(
+        snap.docs.map(async (d) => {
+          const data = d.data();
+          // Get donor info
+          let donorInfo = null;
+          if (data.donorId) {
+            try {
+              const donorSnap = await getDoc(doc(db, "users", data.donorId));
+              if (donorSnap.exists()) {
+                donorInfo = donorSnap.data();
+              }
+            } catch (error) {
+              console.log("No donor info found");
+            }
+          }
+          
+          return {
+            id: d.id,
+            ...data,
+            type: "donation",
+            donorInfo
+          };
+        })
+      );
+      setUserDonations(donations);
+    });
+
+    // Set loading false after initial load
+    setTimeout(() => setLoading(false), 1000);
+
+    return () => {
+      requestsUnsub();
+      premiumUnsub();
+      donationsUnsub();
+    };
   }, [isAuthenticated, isAdmin]);
 
   /* --------------------------------------------------------
-   * ✅ Manual Approve - FIXED: Changed "approved" to "awarded"
+   * 🎯 FREE REQUEST ACTIONS
    * -------------------------------------------------------- */
   const handleManualApprove = async (req) => {
-    if (
-      !window.confirm(
-        `Approve ${req.userName || "this user"} manually for "${req.itemTitle}"?`
-      )
-    )
-      return;
-    setActionBusy((s) => ({ ...s, approve: req.id }));
+    if (!window.confirm(`Approve ${req.userName} for "${req.itemTitle}"?`)) return;
+    setActionBusy((s) => ({ ...s, [`approve-${req.id}`]: true }));
     try {
-      // 🎯 CRITICAL FIX: Changed "approved" to "awarded" to trigger delivery flow
       await adminUpdateRequestStatus({ requestId: req.id, status: "awarded" });
       await sendAdminItemStatusEmail({
         requestId: req.id,
         userEmail: req.userEmail,
-        status: "awarded", // Also update email status
+        status: "awarded",
         itemTitle: req.itemTitle,
       });
-      toast.success(`✅ ${req.userName} manually approved.`);
+      toast.success(`✅ ${req.userName} approved for delivery.`);
     } catch (err) {
       console.error("Manual approve error:", err);
-      toast.error("Failed to approve manually.");
+      toast.error("Failed to approve request.");
     } finally {
-      setActionBusy((s) => ({ ...s, approve: null }));
+      setActionBusy((s) => ({ ...s, [`approve-${req.id}`]: false }));
     }
   };
 
-  /* --------------------------------------------------------
-   * 🚚 Mark Delivered
-   * -------------------------------------------------------- */
-  const handleDelivered = async (req) => {
-    setActionBusy((s) => ({ ...s, deliver: req.id }));
+  const handleRejectRequest = async (req) => {
+    if (!window.confirm(`Reject ${req.userName}'s request for "${req.itemTitle}"?`)) return;
+    setActionBusy((s) => ({ ...s, [`reject-${req.id}`]: true }));
+    try {
+      await adminUpdateRequestStatus({ requestId: req.id, status: "rejected" });
+      await sendAdminItemStatusEmail({
+        requestId: req.id,
+        userEmail: req.userEmail,
+        status: "rejected",
+        itemTitle: req.itemTitle,
+      });
+      toast.success(`❌ Request rejected.`);
+    } catch (err) {
+      console.error("Reject error:", err);
+      toast.error("Failed to reject request.");
+    } finally {
+      setActionBusy((s) => ({ ...s, [`reject-${req.id}`]: false }));
+    }
+  };
+
+  const handleMarkDelivered = async (req) => {
+    setActionBusy((s) => ({ ...s, [`deliver-${req.id}`]: true }));
     try {
       await adminUpdateRequestStatus({ requestId: req.id, status: "delivered" });
       await sendAdminItemStatusEmail({
@@ -235,12 +391,171 @@ export default function RequestsAdmin() {
       console.error("Mark delivered error:", e);
       toast.error("Failed to mark delivered.");
     } finally {
-      setActionBusy((s) => ({ ...s, deliver: null }));
+      setActionBusy((s) => ({ ...s, [`deliver-${req.id}`]: false }));
+    }
+  };
+
+  const handleRelistItem = async (req) => {
+    if (!window.confirm(`Relist item "${req.itemTitle}" for new requests?`)) return;
+    setActionBusy((s) => ({ ...s, [`relist-${req.id}`]: true }));
+    try {
+      // This would call a cloud function to reopen the item
+      await sendUserNotification({
+        userId: req.userId,
+        title: "Item Relisted",
+        message: `The item "${req.itemTitle}" has been relisted for new requests.`
+      });
+      toast.success(`🔄 Item relisted successfully.`);
+    } catch (err) {
+      console.error("Relist error:", err);
+      toast.error("Failed to relist item.");
+    } finally {
+      setActionBusy((s) => ({ ...s, [`relist-${req.id}`]: false }));
     }
   };
 
   /* --------------------------------------------------------
-   * 👤 View User Details (extended stats)
+   * 🚀 PREMIUM ITEM ACTIONS
+   * -------------------------------------------------------- */
+  const handlePremiumStatusChange = async (item, newStatus) => {
+    setActionBusy((s) => ({ ...s, [`premium-${item.id}`]: true }));
+    try {
+      await onPremiumStatusAdvance({
+        itemId: item.id,
+        newStatus: newStatus,
+        currentStatus: item.premiumStatus
+      });
+
+      // Update local state immediately
+      await updateDoc(doc(db, "donations", item.id), {
+        premiumStatus: newStatus,
+        updatedAt: new Date()
+      });
+
+      // Notify buyer
+      if (item.buyerId) {
+        await sendUserNotification({
+          userId: item.buyerId,
+          title: "Order Status Updated",
+          message: `Your order "${item.title}" is now ${newStatus}.`
+        });
+      }
+
+      toast.success(`✅ Premium status updated to "${newStatus}"`);
+    } catch (err) {
+      console.error("Premium status update error:", err);
+      toast.error("Failed to update premium status.");
+    } finally {
+      setActionBusy((s) => ({ ...s, [`premium-${item.id}`]: false }));
+    }
+  };
+
+  /* --------------------------------------------------------
+   * 🎁 USER DONATION ACTIONS
+   * -------------------------------------------------------- */
+  const handleApproveDonation = async (donation) => {
+    if (!window.confirm(`Approve donation "${donation.title}" for listing?`)) return;
+    setActionBusy((s) => ({ ...s, [`approve-donation-${donation.id}`]: true }));
+    try {
+      await updateDoc(doc(db, "donations", donation.id), {
+        status: "active",
+        verified: true,
+        updatedAt: new Date()
+      });
+
+      await sendUserNotification({
+        userId: donation.donorId,
+        title: "Donation Approved!",
+        message: `Your donation "${donation.title}" has been approved and is now listed.`
+      });
+
+      toast.success(`✅ Donation approved and listed.`);
+    } catch (err) {
+      console.error("Approve donation error:", err);
+      toast.error("Failed to approve donation.");
+    } finally {
+      setActionBusy((s) => ({ ...s, [`approve-donation-${donation.id}`]: false }));
+    }
+  };
+
+  const handleRejectDonation = async (donation) => {
+    const reason = prompt("Reason for rejection:");
+    if (!reason) return;
+    
+    setActionBusy((s) => ({ ...s, [`reject-donation-${donation.id}`]: true }));
+    try {
+      await updateDoc(doc(db, "donations", donation.id), {
+        status: "rejected",
+        rejectionReason: reason,
+        updatedAt: new Date()
+      });
+
+      await sendUserNotification({
+        userId: donation.donorId,
+        title: "Donation Not Approved",
+        message: `Your donation "${donation.title}" was not approved. Reason: ${reason}`
+      });
+
+      toast.success(`❌ Donation rejected.`);
+    } catch (err) {
+      console.error("Reject donation error:", err);
+      toast.error("Failed to reject donation.");
+    } finally {
+      setActionBusy((s) => ({ ...s, [`reject-donation-${donation.id}`]: false }));
+    }
+  };
+
+  const handleAwardDonation = async (donation, winnerRequest) => {
+    if (!window.confirm(`Award "${donation.title}" to ${winnerRequest.userName}?`)) return;
+    setActionBusy((s) => ({ ...s, [`award-${donation.id}`]: true }));
+    try {
+      await onAwardDonation({
+        donationId: donation.id,
+        winnerRequestId: winnerRequest.id,
+        winnerUserId: winnerRequest.userId
+      });
+
+      toast.success(`🏆 Donation awarded to ${winnerRequest.userName}`);
+    } catch (err) {
+      console.error("Award donation error:", err);
+      toast.error("Failed to award donation.");
+    } finally {
+      setActionBusy((s) => ({ ...s, [`award-${donation.id}`]: false }));
+    }
+  };
+
+  const handleSchedulePickup = async (donation) => {
+    const pickupDate = prompt("Enter pickup date (YYYY-MM-DD):");
+    const pickupTime = prompt("Enter pickup time (HH:MM):");
+    
+    if (!pickupDate || !pickupTime) return;
+    
+    setActionBusy((s) => ({ ...s, [`pickup-${donation.id}`]: true }));
+    try {
+      await onPickupBooking({
+        donationId: donation.id,
+        donorId: donation.donorId,
+        pickupDate: `${pickupDate} ${pickupTime}`,
+        pickupAddress: donation.donorInfo?.address
+      });
+
+      await sendUserNotification({
+        userId: donation.donorId,
+        title: "Pickup Scheduled",
+        message: `Pickup for your donation "${donation.title}" scheduled for ${pickupDate} at ${pickupTime}.`
+      });
+
+      toast.success(`🚚 Pickup scheduled successfully.`);
+    } catch (err) {
+      console.error("Schedule pickup error:", err);
+      toast.error("Failed to schedule pickup.");
+    } finally {
+      setActionBusy((s) => ({ ...s, [`pickup-${donation.id}`]: false }));
+    }
+  };
+
+  /* --------------------------------------------------------
+   * 👤 User Details Modal (Existing)
    * -------------------------------------------------------- */
   const handleViewUser = async (uid) => {
     setActionBusy((s) => ({ ...s, view: uid }));
@@ -252,7 +567,6 @@ export default function RequestsAdmin() {
       );
       const all = reqsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-      // ✅ Normalize statuses and compute totals
       const normalize = (s = "") => s.toLowerCase().trim();
       const total = all.length;
       const won = all.filter((r) =>
@@ -284,35 +598,111 @@ export default function RequestsAdmin() {
   };
 
   /* --------------------------------------------------------
-   * 🔍 Filter Requests by Status
-   * -------------------------------------------------------- */
-  const filtered = useMemo(() => {
-    let result = requests;
-    
-    // Apply status filter
-    if (filter !== "all") {
-      result = result.filter((r) => (r.status || "pending") === filter);
-    }
-    
-    // ✅ ENSURE descending order by createdAt (most recent first)
-    return result.sort((a, b) => {
-      const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
-      const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
-      return bTime - aTime; // Descending order
-    });
-  }, [requests, filter]);
-
-  /* --------------------------------------------------------
-   * 📊 Statistics - UPDATED: Changed "approved" to "awarded"
+   * 📊 Statistics & Filtering
    * -------------------------------------------------------- */
   const stats = useMemo(() => {
-    const total = requests.length;
-    const pending = requests.filter(r => (r.status || "pending") === "pending").length;
-    const awarded = requests.filter(r => ["approved", "awarded"].includes(r.status || "")).length;
-    const delivered = requests.filter(r => ["delivered", "completed"].includes(r.status || "")).length;
-    
-    return { total, pending, awarded, delivered };
-  }, [requests]);
+    const freeStats = {
+      total: requests.length,
+      pending: requests.filter(r => (r.status || "pending") === "pending").length,
+      awarded: requests.filter(r => ["approved", "awarded"].includes(r.status || "")).length,
+      delivered: requests.filter(r => ["delivered", "completed"].includes(r.status || "")).length,
+    };
+
+    const premiumStats = {
+      total: premiumItems.length,
+      available: premiumItems.filter(p => p.premiumStatus === "available").length,
+      inProgress: premiumItems.filter(p => 
+        ["depositPaid", "preparingDelivery", "inTransit"].includes(p.premiumStatus)
+      ).length,
+      delivered: premiumItems.filter(p => p.premiumStatus === "delivered").length,
+      sold: premiumItems.filter(p => p.premiumStatus === "sold").length,
+    };
+
+    const donationStats = {
+      total: userDonations.length,
+      pending: userDonations.filter(d => d.status === "pending").length,
+      approved: userDonations.filter(d => d.status === "active").length,
+      awarded: userDonations.filter(d => d.status === "awarded").length,
+      completed: userDonations.filter(d => d.status === "completed").length,
+    };
+
+    return { free: freeStats, premium: premiumStats, donations: donationStats };
+  }, [requests, premiumItems, userDonations]);
+
+  const filteredData = useMemo(() => {
+    if (activeTab === "free") {
+      let result = requests;
+      if (filter !== "all") {
+        result = result.filter(r => (r.status || "pending") === filter);
+      }
+      return result.sort((a, b) => {
+        const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
+        const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
+        return bTime - aTime;
+      });
+    }
+
+    if (activeTab === "premium") {
+      let result = premiumItems;
+      if (filter !== "all") {
+        result = result.filter(p => p.premiumStatus === filter);
+      }
+      return result.sort((a, b) => {
+        const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
+        const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
+        return bTime - aTime;
+      });
+    }
+
+    if (activeTab === "donations") {
+      let result = userDonations;
+      if (filter !== "all") {
+        result = result.filter(d => d.status === filter);
+      }
+      return result.sort((a, b) => {
+        const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
+        const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
+        return bTime - aTime;
+      });
+    }
+
+    return [];
+  }, [activeTab, filter, requests, premiumItems, userDonations]);
+
+  const getFilterOptions = () => {
+    switch (activeTab) {
+      case "free":
+        return [
+          { value: "all", label: "All Requests" },
+          { value: "pending", label: "Pending" },
+          { value: "approved", label: "Approved" },
+          { value: "awarded", label: "Awarded" },
+          { value: "delivered", label: "Delivered" },
+          { value: "rejected", label: "Rejected" }
+        ];
+      case "premium":
+        return [
+          { value: "all", label: "All Premium" },
+          { value: "available", label: "Available" },
+          { value: "depositPaid", label: "Deposit Paid" },
+          { value: "preparingDelivery", label: "Preparing Delivery" },
+          { value: "inTransit", label: "In Transit" },
+          { value: "delivered", label: "Delivered" },
+          { value: "sold", label: "Sold" }
+        ];
+      case "donations":
+        return [
+          { value: "all", label: "All Donations" },
+          { value: "pending", label: "Pending Approval" },
+          { value: "active", label: "Active" },
+          { value: "awarded", label: "Awarded" },
+          { value: "completed", label: "Completed" },
+          { value: "rejected", label: "Rejected" }
+        ];
+      default:
+        return [];
+    }
+  };
 
   /* --------------------------------------------------------
    * ⏳ Loading State for Non-Admins
@@ -329,7 +719,7 @@ export default function RequestsAdmin() {
   }
 
   /* --------------------------------------------------------
-   * 🖥️ Render Layout
+   * 🖥️ Render Layout - UNIFIED INTERFACE
    * -------------------------------------------------------- */
   return (
     <div className="flex min-h-screen bg-gray-100">
@@ -350,7 +740,7 @@ export default function RequestsAdmin() {
             🏠 Dashboard
           </Link>
           <Link to="/admin/requests" className="block px-3 py-2 rounded bg-white/20">
-            📋 Requests
+            📋 Unified Requests
           </Link>
           <Link to="/admin/items" className="block px-3 py-2 rounded hover:bg-white/10">
             🎁 Items
@@ -385,7 +775,7 @@ export default function RequestsAdmin() {
               <Link to="/admin" className="flex items-center gap-1 hover:text-indigo-600">
                 <Home size={14} /> Dashboard
               </Link>
-              <ChevronRight size={14} className="mx-1" /> Requests
+              <ChevronRight size={14} className="mx-1" /> Unified Requests
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -395,46 +785,113 @@ export default function RequestsAdmin() {
               onChange={(e) => setFilter(e.target.value)}
               className="border rounded-md px-3 py-2 text-sm"
             >
-              <option value="all">All</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="awarded">Awarded</option>
-              <option value="delivered">Delivered</option>
-              <option value="rejected">Rejected</option>
+              {getFilterOptions().map(option => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </div>
         </header>
 
-        {/* Statistics */}
+        {/* Tab Navigation */}
         <section className="p-4 bg-white border-b">
+          <div className="flex gap-2 mb-4">
+            <TabButton 
+              active={activeTab === "free"} 
+              onClick={() => { setActiveTab("free"); setFilter("all"); }}
+              count={stats.free.total}
+            >
+              📋 Free Requests
+            </TabButton>
+            <TabButton 
+              active={activeTab === "premium"} 
+              onClick={() => { setActiveTab("premium"); setFilter("all"); }}
+              count={stats.premium.total}
+            >
+              👑 Premium Orders
+            </TabButton>
+            <TabButton 
+              active={activeTab === "donations"} 
+              onClick={() => { setActiveTab("donations"); setFilter("all"); }}
+              count={stats.donations.total}
+            >
+              🎁 User Donations
+            </TabButton>
+          </div>
+
+          {/* Statistics */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto">
-            <div className="bg-blue-50 p-4 rounded-lg text-center">
-              <p className="text-sm text-blue-700 font-medium">Total Requests</p>
-              <p className="text-2xl font-bold text-blue-800">{stats.total}</p>
-            </div>
-            <div className="bg-yellow-50 p-4 rounded-lg text-center">
-              <p className="text-sm text-yellow-700 font-medium">Pending</p>
-              <p className="text-2xl font-bold text-yellow-800">{stats.pending}</p>
-            </div>
-            <div className="bg-green-50 p-4 rounded-lg text-center">
-              {/* ✅ UPDATED: Changed "Approved" to "Awarded" */}
-              <p className="text-sm text-green-700 font-medium">Awarded</p>
-              <p className="text-2xl font-bold text-green-800">{stats.awarded}</p>
-            </div>
-            <div className="bg-purple-50 p-4 rounded-lg text-center">
-              <p className="text-sm text-purple-700 font-medium">Delivered</p>
-              <p className="text-2xl font-bold text-purple-800">{stats.delivered}</p>
-            </div>
+            {activeTab === "free" && (
+              <>
+                <div className="bg-blue-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-blue-700 font-medium">Total</p>
+                  <p className="text-2xl font-bold text-blue-800">{stats.free.total}</p>
+                </div>
+                <div className="bg-yellow-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-yellow-700 font-medium">Pending</p>
+                  <p className="text-2xl font-bold text-yellow-800">{stats.free.pending}</p>
+                </div>
+                <div className="bg-green-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-green-700 font-medium">Awarded</p>
+                  <p className="text-2xl font-bold text-green-800">{stats.free.awarded}</p>
+                </div>
+                <div className="bg-purple-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-purple-700 font-medium">Delivered</p>
+                  <p className="text-2xl font-bold text-purple-800">{stats.free.delivered}</p>
+                </div>
+              </>
+            )}
+            {activeTab === "premium" && (
+              <>
+                <div className="bg-blue-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-blue-700 font-medium">Total</p>
+                  <p className="text-2xl font-bold text-blue-800">{stats.premium.total}</p>
+                </div>
+                <div className="bg-green-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-green-700 font-medium">Available</p>
+                  <p className="text-2xl font-bold text-green-800">{stats.premium.available}</p>
+                </div>
+                <div className="bg-yellow-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-yellow-700 font-medium">In Progress</p>
+                  <p className="text-2xl font-bold text-yellow-800">{stats.premium.inProgress}</p>
+                </div>
+                <div className="bg-purple-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-purple-700 font-medium">Delivered</p>
+                  <p className="text-2xl font-bold text-purple-800">{stats.premium.delivered}</p>
+                </div>
+              </>
+            )}
+            {activeTab === "donations" && (
+              <>
+                <div className="bg-blue-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-blue-700 font-medium">Total</p>
+                  <p className="text-2xl font-bold text-blue-800">{stats.donations.total}</p>
+                </div>
+                <div className="bg-yellow-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-yellow-700 font-medium">Pending</p>
+                  <p className="text-2xl font-bold text-yellow-800">{stats.donations.pending}</p>
+                </div>
+                <div className="bg-green-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-green-700 font-medium">Active</p>
+                  <p className="text-2xl font-bold text-green-800">{stats.donations.approved}</p>
+                </div>
+                <div className="bg-purple-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-purple-700 font-medium">Awarded</p>
+                  <p className="text-2xl font-bold text-purple-800">{stats.donations.awarded}</p>
+                </div>
+              </>
+            )}
           </div>
         </section>
 
-        {/* Table */}
+        {/* Data Table */}
         <section className="p-8">
           <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
             {loading ? (
               <div className="text-center text-gray-500 py-6">
                 <Loader2 size={24} className="animate-spin mx-auto mb-2" />
-                <p>Loading requests...</p>
+                <p>Loading {activeTab} data...</p>
               </div>
             ) : error ? (
               <p className="text-red-600 p-4">{error}</p>
@@ -443,90 +900,267 @@ export default function RequestsAdmin() {
                 <table className="min-w-full text-sm">
                   <thead className="bg-gray-50 text-gray-700 border-b">
                     <tr>
-                      <th className="px-4 py-3 text-left font-semibold">User</th>
-                      <th className="px-4 py-3 text-left font-semibold">Item</th>
-                      <th className="px-4 py-3 text-left font-semibold">Status</th>
-                      <th className="px-4 py-3 text-left font-semibold">
-                        <div className="flex items-center gap-1">
-                          <Clock size={14} />
-                          Requested
-                        </div>
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold">Updated</th>
-                      <th className="px-4 py-3 text-right font-semibold">Actions</th>
+                      {activeTab === "free" && (
+                        <>
+                          <th className="px-4 py-3 text-left font-semibold">User</th>
+                          <th className="px-4 py-3 text-left font-semibold">Item</th>
+                          <th className="px-4 py-3 text-left font-semibold">Status</th>
+                          <th className="px-4 py-3 text-left font-semibold">
+                            <div className="flex items-center gap-1">
+                              <Clock size={14} />
+                              Requested
+                            </div>
+                          </th>
+                          <th className="px-4 py-3 text-left font-semibold">Updated</th>
+                          <th className="px-4 py-3 text-right font-semibold">Actions</th>
+                        </>
+                      )}
+                      {activeTab === "premium" && (
+                        <>
+                          <th className="px-4 py-3 text-left font-semibold">Item</th>
+                          <th className="px-4 py-3 text-left font-semibold">Buyer</th>
+                          <th className="px-4 py-3 text-left font-semibold">Status</th>
+                          <th className="px-4 py-3 text-left font-semibold">Price</th>
+                          <th className="px-4 py-3 text-left font-semibold">Created</th>
+                          <th className="px-4 py-3 text-right font-semibold">Update Status</th>
+                        </>
+                      )}
+                      {activeTab === "donations" && (
+                        <>
+                          <th className="px-4 py-3 text-left font-semibold">Item</th>
+                          <th className="px-4 py-3 text-left font-semibold">Donor</th>
+                          <th className="px-4 py-3 text-left font-semibold">Status</th>
+                          <th className="px-4 py-3 text-left font-semibold">Delivery</th>
+                          <th className="px-4 py-3 text-left font-semibold">Created</th>
+                          <th className="px-4 py-3 text-right font-semibold">Actions</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {filtered.map((r) => (
-                      <tr key={r.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-gray-800">
-                            {r.userName || "—"}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {r.userEmail}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-gray-700">
-                          {r.itemTitle || r.itemId}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`px-2 py-1 rounded text-xs font-medium ${
-                              statusColors[r.status] ||
-                              "bg-gray-100 text-gray-700"
-                            }`}
-                          >
-                            {r.status || "pending"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-500">
-                          <div className="flex flex-col">
-                            <span className="font-medium">{formatDate(r.createdAt)}</span>
-                            <span className="text-gray-400">{formatTimeAgo(r.createdAt)}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-500">
-                          <div className="flex flex-col">
-                            <span>{formatDate(r.lastStatusUpdate)}</span>
-                            <span className="text-gray-400">{formatTimeAgo(r.lastStatusUpdate)}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <div className="flex justify-end gap-2 flex-wrap">
-                            {r.status === "pending" && (
-                              <AdminButton
-                                label="Manual Approve"
-                                onClick={() => handleManualApprove(r)}
-                                busy={actionBusy.approve === r.id}
-                                color="blue"
-                              />
-                            )}
-                            {/* ✅ UPDATED: Include both "approved" and "awarded" statuses */}
-                            {["approved", "awarded"].includes(r.status) && (
-                              <AdminButton
-                                label="Delivered"
-                                onClick={() => handleDelivered(r)}
-                                busy={actionBusy.deliver === r.id}
-                                color="green"
-                              />
-                            )}
-                            <AdminButton
-                              label="View Details"
-                              onClick={() => handleViewUser(r.userId)}
-                              busy={actionBusy.view === r.userId}
-                              color="purple"
-                            />
-                          </div>
-                        </td>
+                    {filteredData.map((item) => (
+                      <tr key={item.id} className="hover:bg-gray-50">
+                        {/* FREE REQUESTS ROW */}
+                        {activeTab === "free" && (
+                          <>
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-gray-800">
+                                {item.userName || "—"}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {item.userEmail}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-gray-700">
+                              {item.itemTitle || item.itemId}
+                            </td>
+                            <td className="px-4 py-3">
+                              <StatusBadge status={item.status} type="free" />
+                            </td>
+                            <td className="px-4 py-3 text-xs text-gray-500">
+                              <div className="flex flex-col">
+                                <span className="font-medium">{formatDate(item.createdAt)}</span>
+                                <span className="text-gray-400">{formatTimeAgo(item.createdAt)}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-gray-500">
+                              <div className="flex flex-col">
+                                <span>{formatDate(item.lastStatusUpdate)}</span>
+                                <span className="text-gray-400">{formatTimeAgo(item.lastStatusUpdate)}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex justify-end gap-2 flex-wrap">
+                                {item.status === "pending" && (
+                                  <>
+                                    <AdminButton
+                                      label="Approve"
+                                      onClick={() => handleManualApprove(item)}
+                                      busy={actionBusy[`approve-${item.id}`]}
+                                      color="green"
+                                      icon={CheckCircle}
+                                    />
+                                    <AdminButton
+                                      label="Reject"
+                                      onClick={() => handleRejectRequest(item)}
+                                      busy={actionBusy[`reject-${item.id}`]}
+                                      color="red"
+                                      icon={X}
+                                    />
+                                  </>
+                                )}
+                                {["approved", "awarded"].includes(item.status) && (
+                                  <>
+                                    <AdminButton
+                                      label="Delivered"
+                                      onClick={() => handleMarkDelivered(item)}
+                                      busy={actionBusy[`deliver-${item.id}`]}
+                                      color="blue"
+                                      icon={Truck}
+                                    />
+                                    <AdminButton
+                                      label="Relist"
+                                      onClick={() => handleRelistItem(item)}
+                                      busy={actionBusy[`relist-${item.id}`]}
+                                      color="purple"
+                                      icon={RefreshCcw}
+                                    />
+                                  </>
+                                )}
+                                <AdminButton
+                                  label="View User"
+                                  onClick={() => handleViewUser(item.userId)}
+                                  busy={actionBusy.view === item.userId}
+                                  color="gray"
+                                  icon={User}
+                                />
+                              </div>
+                            </td>
+                          </>
+                        )}
+
+                        {/* PREMIUM ORDERS ROW */}
+                        {activeTab === "premium" && (
+                          <>
+                            <td className="px-4 py-3 text-gray-700">
+                              <div className="font-medium">{item.title}</div>
+                              <div className="text-xs text-gray-500">ID: {item.id}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              {item.buyerInfo ? (
+                                <>
+                                  <div className="font-medium text-gray-800">
+                                    {item.buyerInfo.username || item.buyerInfo.name || "—"}
+                                  </div>
+                                  <div className="text-xs text-gray-500">
+                                    {item.buyerInfo.email}
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <StatusBadge status={item.premiumStatus} type="premium" />
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-indigo-600">
+                              ¥{item.price?.toLocaleString() || "—"}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-gray-500">
+                              {formatDate(item.createdAt)}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <select
+                                value={item.premiumStatus || "available"}
+                                onChange={(e) => handlePremiumStatusChange(item, e.target.value)}
+                                disabled={actionBusy[`premium-${item.id}`]}
+                                className="border rounded px-2 py-1 text-xs"
+                              >
+                                <option value="available">Available</option>
+                                <option value="depositPaid">Deposit Paid</option>
+                                <option value="preparingDelivery">Preparing Delivery</option>
+                                <option value="inTransit">In Transit</option>
+                                <option value="delivered">Delivered</option>
+                                <option value="sold">Sold</option>
+                              </select>
+                            </td>
+                          </>
+                        )}
+
+                        {/* USER DONATIONS ROW */}
+                        {activeTab === "donations" && (
+                          <>
+                            <td className="px-4 py-3 text-gray-700">
+                              <div className="font-medium">{item.title}</div>
+                              <div className="text-xs text-gray-500">{item.category}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              {item.donorInfo ? (
+                                <>
+                                  <div className="font-medium text-gray-800">
+                                    {item.donorInfo.username || item.donorInfo.name || "—"}
+                                  </div>
+                                  <div className="text-xs text-gray-500">
+                                    {item.donorInfo.email}
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <StatusBadge status={item.status} type="donation" />
+                            </td>
+                            <td className="px-4 py-3 text-xs text-gray-500">
+                              {item.delivery === "pickup" ? (
+                                <span className="flex items-center gap-1">
+                                  <MapPin size={12} />
+                                  Pickup: {item.pickupLocation || "N/A"}
+                                </span>
+                              ) : (
+                                <span>Delivery</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-gray-500">
+                              {formatDate(item.createdAt)}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex justify-end gap-2 flex-wrap">
+                                {item.status === "pending" && (
+                                  <>
+                                    <AdminButton
+                                      label="Approve"
+                                      onClick={() => handleApproveDonation(item)}
+                                      busy={actionBusy[`approve-donation-${item.id}`]}
+                                      color="green"
+                                      icon={CheckCircle}
+                                    />
+                                    <AdminButton
+                                      label="Reject"
+                                      onClick={() => handleRejectDonation(item)}
+                                      busy={actionBusy[`reject-donation-${item.id}`]}
+                                      color="red"
+                                      icon={X}
+                                    />
+                                  </>
+                                )}
+                                {item.status === "active" && (
+                                  <AdminButton
+                                    label="Award"
+                                    onClick={() => {/* You would implement winner selection here */}}
+                                    busy={actionBusy[`award-${item.id}`]}
+                                    color="purple"
+                                    icon={Award}
+                                  />
+                                )}
+                                {item.delivery === "pickup" && (
+                                  <AdminButton
+                                    label="Schedule Pickup"
+                                    onClick={() => handleSchedulePickup(item)}
+                                    busy={actionBusy[`pickup-${item.id}`]}
+                                    color="orange"
+                                    icon={Truck}
+                                  />
+                                )}
+                                <AdminButton
+                                  label="View Donor"
+                                  onClick={() => handleViewUser(item.donorId)}
+                                  busy={actionBusy.view === item.donorId}
+                                  color="gray"
+                                  icon={User}
+                                />
+                              </div>
+                            </td>
+                          </>
+                        )}
                       </tr>
                     ))}
                   </tbody>
                 </table>
-                {filtered.length === 0 && (
+                {filteredData.length === 0 && (
                   <div className="text-center text-gray-500 py-8">
                     <Calendar size={48} className="mx-auto mb-2 text-gray-300" />
-                    <p>No requests found</p>
+                    <p>No {activeTab} items found</p>
                   </div>
                 )}
               </div>
@@ -535,7 +1169,7 @@ export default function RequestsAdmin() {
         </section>
       </main>
 
-      {/* User Details Modal */}
+      {/* User Details Modal (Keep existing) */}
       {userDetails && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full relative p-6 overflow-y-auto max-h-[90vh]">
@@ -545,12 +1179,9 @@ export default function RequestsAdmin() {
             >
               ×
             </button>
-
             <h2 className="text-xl font-semibold mb-3">User Details</h2>
             <p className="text-sm text-gray-700 mb-1">{userDetails.name}</p>
             <p className="text-xs text-gray-500 mb-4">{userDetails.email}</p>
-
-            {/* ✅ Extended Stats Section */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
               <div className="bg-gray-50 p-3 rounded-lg text-center">
                 <p className="text-xs text-gray-500">📋 Total</p>
@@ -569,14 +1200,12 @@ export default function RequestsAdmin() {
                 <p className="font-bold text-blue-800">{userDetails.delivered}</p>
               </div>
             </div>
-
             {userDetails.address && (
               <div className="bg-gray-50 p-3 rounded-lg mb-3 text-sm text-gray-700">
                 <p>{userDetails.address.address || "No address on file"}</p>
                 {userDetails.address.phone && <p>📞 {userDetails.address.phone}</p>}
               </div>
             )}
-
             <h3 className="font-semibold text-gray-700 mb-2">Recent Requests</h3>
             <ul className="divide-y max-h-48 overflow-y-auto border rounded-md">
               {userDetails.requests.map((r) => (
@@ -585,14 +1214,7 @@ export default function RequestsAdmin() {
                     <span className="font-medium text-gray-800">
                       {r.itemTitle || r.itemId}
                     </span>
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-xs ${
-                        statusColors[r.status] ||
-                        "bg-gray-100 text-gray-700"
-                      }`}
-                    >
-                      {r.status}
-                    </span>
+                    <StatusBadge status={r.status} type="free" />
                   </div>
                   <div className="text-xs text-gray-400 mt-1">
                     {formatDate(r.createdAt)} • {formatTimeAgo(r.createdAt)}

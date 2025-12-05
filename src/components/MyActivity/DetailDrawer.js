@@ -1,266 +1,392 @@
+// ========================================================================
+// FILE: DetailDrawer.js — Phase-2 Premium + Free Flow (FINAL STABLE PATCH)
+// Fully aligned with MyActivity v4, PurchaseCard v3, RequestCard v3
+// ========================================================================
+
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+
 import {
   X,
-  ChevronLeft,
-  ChevronRight,
-  Calendar,
   Package,
+  Truck,
+  CheckCircle,
+  CreditCard,
+  Clock,
+  Gift,
+  ShoppingBag,
+  XCircle
 } from "lucide-react";
 
 import StatusBadge from "./StatusBadge";
 import ActionButton from "./ActionButton";
 import DeliveryTimeline from "./DeliveryTimeline";
+import PremiumTimeline from "./PremiumTimeline";
+import PremiumActionPanel from "./PremiumActionPanel";
 
-const DetailDrawer = ({
+// ----------------------------------------------------------------------
+// PREMIUM STATUS CONFIG — UNIFIED WITH PurchaseCard + MyActivity
+// ----------------------------------------------------------------------
+const PremiumStatusConfig = {
+  available: {
+    label: "Available",
+    badgeColor: "bg-emerald-600 text-white",
+    icon: Package,
+    canDelete: true,
+  },
+  depositPaid: {
+    label: "Deposit Paid",
+    badgeColor: "bg-amber-600 text-white",
+    icon: CreditCard,
+    canDelete: false,
+  },
+  sellerAccepted: {
+    label: "Seller Accepted",
+    badgeColor: "bg-blue-600 text-white",
+    icon: CheckCircle,
+    canDelete: false,
+  },
+  preparingDelivery: {
+    label: "Preparing Delivery",
+    badgeColor: "bg-indigo-600 text-white",
+    icon: Package,
+    canDelete: false,
+  },
+  inTransit: {
+    label: "In Transit",
+    badgeColor: "bg-purple-600 text-white",
+    icon: Truck,
+    canDelete: false,
+  },
+  delivered: {
+    label: "Delivered",
+    badgeColor: "bg-green-600 text-white",
+    icon: CheckCircle,
+    canDelete: false,
+  },
+  sold: {
+    label: "Completed",
+    badgeColor: "bg-gray-700 text-white",
+    icon: CheckCircle,
+    canDelete: false,
+  },
+  buyerDeclined: {
+    label: "Buyer Declined",
+    badgeColor: "bg-red-600 text-white",
+    icon: XCircle,
+    canDelete: true,
+  },
+  cancelled: {
+    label: "Cancelled",
+    badgeColor: "bg-gray-600 text-white",
+    icon: X,
+    canDelete: true,
+  },
+  autoClosed: {
+    label: "Auto Closed",
+    badgeColor: "bg-gray-600 text-white",
+    icon: Clock,
+    canDelete: true,
+  },
+  unknown: {
+    label: "Processing",
+    badgeColor: "bg-gray-500 text-white",
+    icon: Clock,
+    canDelete: false,
+  }
+};
+
+// ========================================================================
+// MAIN COMPONENT
+// ========================================================================
+
+export default function DetailDrawer({
   open,
   onClose,
   data,
+  drawerType,
   currentUser,
   loadingStates,
   onDelete,
   onAcceptAward,
   onDeclineAward,
   onConfirmDelivery,
-}) => {
-  const [imageIndex, setImageIndex] = useState(0);
+  onSchedulePickup,
+  onRelist,
+  onPremiumAction,
+}) {
+  const [imageIndex] = useState(0);
 
   if (!open || !data) return null;
 
-  /* ------------------------------------------------------------------
-   * USER-ONLY LOGIC (No donor/admin actions allowed)
-   * ------------------------------------------------------------------ */
+  // ------------------------------------------------------------------
+  // User roles
+  // ------------------------------------------------------------------
+  const isPremiumItem = data?.isPremium || data?.type === "premium";
+  const isBuyer = data?.userId === currentUser?.uid || data?.buyerId === currentUser?.uid;
+  const isOwner = data?.donorId === currentUser?.uid;
+  const isRequester = data?.userId === currentUser?.uid;
 
-  const isRequester = data.userId === currentUser?.uid;
+  // ------------------------------------------------------------------
+  // Premium status
+  // ------------------------------------------------------------------
+  const premiumStatus = data?.premiumStatus || "unknown";
+  const statusConfig = PremiumStatusConfig[premiumStatus] || PremiumStatusConfig.unknown;
 
-  // Award acceptance: awarded but NO deliveryStatus yet
-  const isAwardedRequester =
-    isRequester && data.status === "awarded" && !data.deliveryStatus;
+  // ------------------------------------------------------------------
+  // Delete permissions
+  // ------------------------------------------------------------------
+  const canDeletePremium =
+    isPremiumItem &&
+    isOwner &&
+    ["cancelled", "buyerDeclined", "autoClosed", "available"].includes(
+      premiumStatus
+    );
 
-  // User can confirm delivery ONLY when admin marks "out_for_delivery" 
-  const canConfirmDelivery =
-    isRequester && data.deliveryStatus === "out_for_delivery";
+  const canDeleteFree =
+    !isPremiumItem &&
+    ["expired", "cancelled", "completed", "delivered"].includes(
+      data?.status
+    );
 
-  // Deletable when item lifecycle is over or ended
-  const canDelete =
-    [
-      "expired",
-      "cancelled",
-      "rejected",
-      "awarded_to_other",
-      "delivered",
-      "completed",
-      "deleted",
-    ].includes(data.status) ||
-    data.deliveryStatus === "delivered" ||
-    data.deliveryStatus === "completed";
+  // ------------------------------------------------------------------
+  // Confirm delivery permissions
+  // ------------------------------------------------------------------
+  const canConfirmDeliveryFree =
+    isRequester && data?.deliveryStatus === "delivered";
 
-  /* ------------------------------------------------------------------
-   * IMAGE / DISPLAY CONTENT
-   * ------------------------------------------------------------------ */
+  const canConfirmDeliveryPremium =
+    isPremiumItem &&
+    isBuyer &&
+    premiumStatus === "inTransit";
 
+  // ------------------------------------------------------------------
+  // Relist permissions
+  // ------------------------------------------------------------------
+  const canRelistPremium =
+    isPremiumItem &&
+    isOwner &&
+    ["cancelled", "buyerDeclined", "autoClosed", "available"].includes(
+      premiumStatus
+    );
+
+  // ------------------------------------------------------------------
+  // Safe values
+  // ------------------------------------------------------------------
   const images =
-    data.images ||
-    data.itemData?.images ||
-    [data.itemImage || "/images/default-item.jpg"];
+    data?.images ||
+    data?.itemData?.images ||
+    ["/images/default-item.jpg"];
+
+  const safeImage = images[imageIndex];
 
   const title =
-    data.title || data.itemData?.title || data.itemTitle || "Untitled";
+    data?.title ||
+    data?.itemData?.title ||
+    data?.itemTitle ||
+    "Untitled Item";
 
   const description =
-    data.description ||
-    data.itemData?.description ||
-    "No description available.";
+    data?.description ||
+    data?.itemData?.description ||
+    "No description available";
+
+  // ======================================================================
+  // PREMIUM SECTION
+  // ======================================================================
+
+  const renderPremiumContent = () => (
+    <div className="space-y-6">
+
+      {/* Header card */}
+      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl p-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <ShoppingBag className="w-6 h-6" />
+            <div>
+              <h3 className="text-lg font-bold">Premium Item</h3>
+              <p className="text-indigo-100 text-sm">Exclusive purchase</p>
+            </div>
+          </div>
+
+          <div className={`px-3 py-1 rounded-full ${statusConfig.badgeColor}`}>
+            {statusConfig.label}
+          </div>
+        </div>
+      </div>
+
+      {/* Timeline */}
+      <PremiumTimeline currentStatus={premiumStatus} />
+
+      {/* Action panel */}
+      <PremiumActionPanel
+        item={data}
+        onPremiumAction={onPremiumAction}
+        loading={loadingStates.premium === data.id}
+      />
+
+      {/* Confirm delivery */}
+      {canConfirmDeliveryPremium && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-5">
+          <h4 className="flex items-center gap-2 text-lg font-semibold text-green-800 mb-3">
+            <Package className="w-5 h-5" />
+            Confirm Delivery
+          </h4>
+
+          <p className="text-green-700 text-sm mb-4">
+            Please confirm once the item arrives.
+          </p>
+
+          <ActionButton
+            variant="success"
+            fullWidth
+            loading={loadingStates.premium === data.id}
+            onClick={() => onPremiumAction(data, "confirm_delivery")}
+          >
+            Confirm Received
+          </ActionButton>
+        </div>
+      )}
+    </div>
+  );
+
+  // ======================================================================
+  // FREE CONTENT
+  // ======================================================================
+
+  const renderFreeContent = () => (
+    <div className="space-y-6">
+
+      <div className="bg-gradient-to-r from-emerald-600 to-green-600 text-white rounded-xl p-5 flex items-center gap-3">
+        <Gift className="w-6 h-6" />
+        <h3 className="text-lg font-bold">Free Item</h3>
+      </div>
+
+      <DeliveryTimeline
+        status={data.status}
+        deliveryStatus={data.deliveryStatus}
+        pickupDate={data.pickupDate}
+      />
+
+      {canConfirmDeliveryFree && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-5">
+          <h4 className="flex items-center gap-2 text-lg font-semibold text-green-800 mb-3">
+            <Package className="w-5 h-5" />
+            Confirm Delivery
+          </h4>
+
+          <p className="text-green-700 text-sm mb-4">
+            Confirm once item is received.
+          </p>
+
+          <ActionButton
+            variant="success"
+            fullWidth
+            loading={loadingStates.confirm === data.id}
+            onClick={() => onConfirmDelivery(data)}
+          >
+            Confirm Received
+          </ActionButton>
+        </div>
+      )}
+    </div>
+  );
+
+  // ======================================================================
+  // MAIN UI
+  // ======================================================================
 
   return (
     <AnimatePresence>
       {open && (
         <motion.div
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex justify-center items-end md:items-center z-50 p-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex justify-center items-end md:items-center z-50 p-4"
           onClick={onClose}
         >
+
+          {/* DRAWER */}
           <motion.div
+            onClick={(e) => e.stopPropagation()}
             initial={{ y: "100%", opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: "100%", opacity: 0 }}
-            transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            onClick={(e) => e.stopPropagation()}
+            transition={{ type: "spring", damping: 20, stiffness: 200 }}
             className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
           >
-            {/* ------------------------------------------------------------------
-             * HEADER
-             * ------------------------------------------------------------------ */}
-            <div className="flex items-center justify-between p-6 border-b border-gray-200">
-              <div className="flex items-center gap-4 flex-1">
-                <div className="relative w-16 h-16 rounded-xl bg-gray-100 overflow-hidden">
-                  <img
-                    src={images[imageIndex]}
-                    alt={title}
-                    className="object-cover w-full h-full"
-                  />
-                </div>
 
-                <div className="flex-1 min-w-0">
-                  <h2 className="text-xl font-bold text-gray-900 truncate">
-                    {title}
-                  </h2>
-                  <p className="text-sm text-gray-600 truncate">
-                    {description}
-                  </p>
+            {/* HEADER */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <div className="flex items-center gap-4">
+                <img
+                  src={safeImage}
+                  className="w-16 h-16 object-cover rounded-lg"
+                  alt=""
+                  onError={(e) => (e.target.src = "/images/default-item.jpg")}
+                />
+                <div>
+                  <h2 className="text-lg font-bold">{title}</h2>
+                  <p className="text-sm text-gray-600">{description}</p>
                 </div>
               </div>
 
               <button
                 onClick={onClose}
-                className="w-10 h-10 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"
+                className="w-10 h-10 bg-red-500 text-white rounded-full flex items-center justify-center"
               >
                 <X size={20} />
               </button>
             </div>
 
-            {/* ------------------------------------------------------------------
-             * IMAGE CAROUSEL
-             * ------------------------------------------------------------------ */}
-            {images.length > 1 && (
-              <div className="relative border-b border-gray-200 bg-gray-50">
-                <div className="relative h-48 flex items-center justify-center bg-gray-100">
-                  <img
-                    src={images[imageIndex]}
-                    alt={title}
-                    className="max-w-full max-h-full object-contain"
-                  />
-
-                  <button
-                    onClick={() =>
-                      setImageIndex((i) => (i - 1 + images.length) % images.length)
-                    }
-                    className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 text-white"
-                  >
-                    <ChevronLeft size={20} />
-                  </button>
-
-                  <button
-                    onClick={() =>
-                      setImageIndex((i) => (i + 1) % images.length)
-                    }
-                    className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 text-white"
-                  >
-                    <ChevronRight size={20} />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* ------------------------------------------------------------------
-             * CONTENT (Status + Timeline + Actions)
-             * ------------------------------------------------------------------ */}
+            {/* CONTENT */}
             <div className="flex-1 overflow-y-auto p-6">
-
-              {/* Status Badge */}
               <div className="mb-6">
                 <StatusBadge
-                  status={data.status}
-                  deliveryStatus={data.deliveryStatus}
+                  status={isPremiumItem ? premiumStatus : data.status}
+                  isPremium={isPremiumItem}
                   size="lg"
                 />
               </div>
 
-              {/* Delivery Progress Timeline */}
-              <DeliveryTimeline
-                status={data.deliveryStatus || data.status}
-                deliveryStatus={data.deliveryStatus}
-                pickupDate={data.pickupDate}
-              />
+              {isPremiumItem ? renderPremiumContent() : renderFreeContent()}
 
-              {/* ------------------------------------------------------------------
-               * ACTION SECTIONS
-               * ------------------------------------------------------------------ */}
-              <div className="space-y-4">
+              {/* DELETE */}
+              {(canDeletePremium || canDeleteFree) && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-5 mt-6">
+                  <h4 className="text-red-800 font-semibold mb-3">Remove Item</h4>
 
-                {/* User Accept/Decline Award */}
-                {isAwardedRequester && (
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-5">
-                    <h4 className="text-lg font-semibold text-yellow-800 mb-3">
-                      Accept Your Award
-                    </h4>
-                    <p className="text-sm text-yellow-700 mb-4">
-                      Congratulations! Please accept and provide delivery details.
-                    </p>
+                  <ActionButton
+                    variant="danger"
+                    fullWidth
+                    loading={loadingStates.delete === data.id}
+                    onClick={() => onDelete(data)}
+                  >
+                    Remove from List
+                  </ActionButton>
+                </div>
+              )}
 
-                    <div className="flex gap-3">
-                      <ActionButton
-                        variant="success"
-                        onClick={() => onAcceptAward(data)}
-                        loading={loadingStates.accept === data.id}
-                      >
-                        Accept Delivery
-                      </ActionButton>
+              {/* RELIST PREMIUM */}
+              {canRelistPremium && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 mt-6">
+                  <h4 className="text-blue-800 font-semibold mb-3">Relist Item</h4>
 
-                      <ActionButton
-                        variant="outline"
-                        onClick={() => onDeclineAward(data)}
-                        loading={loadingStates.accept === data.id}
-                      >
-                        Decline Offer
-                      </ActionButton>
-                    </div>
-                  </div>
-                )}
-
-                {/* Confirm Delivery (User only, last step) */}
-                {canConfirmDelivery && (
-                  <div className="bg-green-50 border border-green-200 rounded-xl p-5">
-                    <h4 className="flex items-center gap-2 text-lg font-semibold text-green-800 mb-3">
-                      <Package className="w-5 h-5" />
-                      Confirm Delivery
-                    </h4>
-
-                    <p className="text-green-700 text-sm mb-4">
-                      Your item has been marked as out for delivery.  
-                      Please confirm once received.
-                    </p>
-
-                    <ActionButton
-                      variant="success"
-                      onClick={() => onConfirmDelivery(data)}
-                      loading={loadingStates.confirm === data.id}
-                    >
-                      Confirm Received
-                    </ActionButton>
-                  </div>
-                )}
-
-                {/* Delete Request (when lifecycle is completed or invalid) */}
-                {canDelete && (
-                  <div className="bg-red-50 border border-red-200 p-5 rounded-xl">
-                    <h4 className="text-lg font-semibold text-red-800 mb-3">
-                      Remove Item
-                    </h4>
-
-                    <p className="text-red-700 text-sm mb-4">
-                      This item is no longer active. You may remove it.
-                    </p>
-
-                    <ActionButton
-                      variant="danger"
-                      onClick={() => onDelete(data)}
-                      loading={loadingStates.delete === data.id}
-                    >
-                      Remove from List
-                    </ActionButton>
-                  </div>
-                )}
-
-              </div>
+                  <ActionButton
+                    variant="primary"
+                    fullWidth
+                    loading={loadingStates.relist === data.id}
+                    onClick={() => onRelist(data)}
+                  >
+                    Relist Premium Item
+                  </ActionButton>
+                </div>
+              )}
             </div>
           </motion.div>
         </motion.div>
       )}
     </AnimatePresence>
   );
-};
-
-export default DetailDrawer;
+}

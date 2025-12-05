@@ -1,31 +1,43 @@
-// ✅ FILE: src/components/MyActivity/DepositCard.js (PATCHED - Mobile First)
+// ✅ FILE: src/components/MyActivity/DepositCard.js (FINAL PHASE-2)
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Trash, Loader2, CreditCard, Calendar, CheckCircle, Clock } from 'lucide-react';
+import { 
+  Trash, Loader2, CreditCard, Calendar, 
+  CheckCircle, Clock, XCircle 
+} from 'lucide-react';
 import StatusBadge from './StatusBadge';
 
 const DepositCard = ({ item, onDelete, deleting }) => {
+  
+  // Allow deletion ONLY for pending deposits
+  const canDelete = item.status === "pending";
+
   const handleDelete = (e) => {
     e.stopPropagation();
+    if (!canDelete) return;
     onDelete(item);
   };
 
-  // Format amount with proper currency
-  const formatAmount = (amount) => {
-    return `¥${Number(amount).toLocaleString()}`;
-  };
+  const formatAmount = (amount) =>
+    `¥${Number(amount).toLocaleString()}`;
 
-  // Get status icon
   const getStatusIcon = (status) => {
     switch (status) {
       case 'verified':
         return <CheckCircle className="w-4 h-4 text-green-600" />;
       case 'processing':
         return <Clock className="w-4 h-4 text-yellow-600" />;
+      case 'rejected':
+        return <XCircle className="w-4 h-4 text-red-600" />;
       default:
         return <CreditCard className="w-4 h-4 text-blue-600" />;
     }
   };
+
+  const createdDate =
+    item.createdAt?.toDate
+      ? item.createdAt.toDate().toLocaleDateString()
+      : new Date(item.createdAt).toLocaleDateString();
 
   return (
     <motion.div
@@ -33,7 +45,7 @@ const DepositCard = ({ item, onDelete, deleting }) => {
       animate={{ opacity: 1, y: 0 }}
       className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200 p-4"
     >
-      {/* Header */}
+      {/* HEADER */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-blue-50 rounded-lg">
@@ -41,16 +53,22 @@ const DepositCard = ({ item, onDelete, deleting }) => {
           </div>
           <div>
             <span className="font-semibold text-gray-900 block">Deposit</span>
-            <span className="text-sm text-gray-500">Funds Added</span>
+            <span className="text-sm text-gray-500">Payment Record</span>
           </div>
         </div>
-        
-        {/* Delete Button */}
+
+        {/* DELETE BUTTON */}
         <button
           onClick={handleDelete}
-          disabled={deleting}
-          className="bg-red-500 hover:bg-red-600 text-white p-2 rounded-full transition-all duration-200 disabled:opacity-50 transform hover:scale-110 active:scale-95"
-          title="Delete Record"
+          disabled={deleting || !canDelete}
+          className={`
+            p-2 rounded-full transition-all duration-200
+            ${canDelete
+              ? "bg-red-500 hover:bg-red-600 text-white"
+              : "bg-gray-200 text-gray-400 cursor-not-allowed"}
+            disabled:opacity-50 transform hover:scale-110 active:scale-95
+          `}
+          title={canDelete ? "Delete Record" : "Cannot delete after processing"}
         >
           {deleting ? (
             <Loader2 size={16} className="animate-spin" />
@@ -60,7 +78,7 @@ const DepositCard = ({ item, onDelete, deleting }) => {
         </button>
       </div>
 
-      {/* Amount Display - Mobile Optimized */}
+      {/* AMOUNT PANEL */}
       <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
         <div className="flex items-center justify-between">
           <span className="text-sm text-gray-600 font-medium">Amount:</span>
@@ -77,29 +95,21 @@ const DepositCard = ({ item, onDelete, deleting }) => {
         </div>
       </div>
 
-      {/* Status and Metadata */}
+      {/* STATUS / DATE */}
       <div className="space-y-3">
-        {/* Status Badge */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             {getStatusIcon(item.status)}
-            <StatusBadge 
-              status={item.status} 
-              size="sm"
-            />
+            <StatusBadge status={item.status} size="sm" />
           </div>
-          
-          {/* Date */}
+
           <div className="flex items-center gap-1 text-xs text-gray-500">
             <Calendar size={12} />
-            <span>
-              {item.createdAt?.toDate?.().toLocaleDateString() || 
-               new Date(item.createdAt).toLocaleDateString()}
-            </span>
+            <span>{createdDate}</span>
           </div>
         </div>
 
-        {/* Additional Info */}
+        {/* METADATA */}
         {(item.transactionId || item.paymentMethod) && (
           <div className="pt-3 border-t border-gray-100">
             <div className="grid grid-cols-2 gap-2 text-xs">
@@ -123,20 +133,27 @@ const DepositCard = ({ item, onDelete, deleting }) => {
           </div>
         )}
 
-        {/* Processing Note */}
-        {item.status === 'processing' && (
+        {/* STATUS NOTES */}
+        {item.status === "processing" && (
           <div className="p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
             <p className="text-xs text-yellow-800 text-center">
-              ⏳ Processing - usually completes within 24 hours
+              ⏳ Processing — usually completes within 24 hours
             </p>
           </div>
         )}
 
-        {/* Verified Note */}
-        {item.status === 'verified' && (
+        {item.status === "verified" && (
           <div className="p-2 bg-green-50 border border-green-200 rounded-lg">
             <p className="text-xs text-green-800 text-center">
-              ✅ Successfully verified and added to your balance
+              ✅ Deposit verified and added to your balance
+            </p>
+          </div>
+        )}
+
+        {item.status === "rejected" && (
+          <div className="p-2 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-xs text-red-700 text-center">
+              ❌ Deposit rejected — please reupload or contact support
             </p>
           </div>
         )}

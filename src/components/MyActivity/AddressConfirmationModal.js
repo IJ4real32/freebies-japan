@@ -1,17 +1,15 @@
-// ✅ FINAL CLEAN AddressConfirmationModal.js
+// ✅ FILE: src/components/MyActivity/AddressConfirmationModal.jsx (PHASE-2 FINAL)
 import React, { useState } from "react";
-import {
-  updateDoc,
-  doc,
-  setDoc,
-  serverTimestamp,
-} from "firebase/firestore";
-import { db } from "../../config/firebase";
-import { useAuth } from "../../contexts/AuthContext"; // ⭐ NEW
-import { X, Loader2, MapPin, Phone, MessageSquare } from "lucide-react";
+import { doc, updateDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../../firebase";        // ✅ FIXED PATH
+import { useAuth } from "../../contexts/AuthContext";
 
-const AddressConfirmationModal = ({ open, onClose, request }) => {
-  const { currentUser } = useAuth(); // ⭐ Required for email fallback
+import { 
+  X, Loader2, MapPin, Phone, MessageSquare 
+} from "lucide-react";
+
+const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
+  const { currentUser } = useAuth();
 
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
@@ -19,13 +17,14 @@ const AddressConfirmationModal = ({ open, onClose, request }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  if (!open || !request) return null;
+
   const handleSubmit = async () => {
-    if (!request) {
-      setError("No request data provided.");
+    if (!address.trim() || !phone.trim()) {
+      setError("Address and phone number are required.");
       return;
     }
 
-    // ⭐ FINAL EMAIL FALLBACK LOGIC
     const userEmailSafe =
       request.userEmail ||
       request.email ||
@@ -38,20 +37,14 @@ const AddressConfirmationModal = ({ open, onClose, request }) => {
       return;
     }
 
-    if (!address.trim() || !phone.trim()) {
-      setError("Address and phone number are required.");
-      return;
-    }
-
     setLoading(true);
     setError("");
 
     try {
-      // ⭐ Correct deliveryDetails payload
-      const deliveryDetailsData = {
+      const deliveryPayload = {
         requestId: request.id,
         userId: request.userId,
-        userEmail: userEmailSafe, // ⭐ ALWAYS POPULATED
+        userEmail: userEmailSafe,
         itemId: request.itemId,
         itemTitle:
           request.itemData?.title ||
@@ -66,14 +59,18 @@ const AddressConfirmationModal = ({ open, onClose, request }) => {
         status: "accepted",
         deliveryStatus: "accepted",
 
-        createdAt: serverTimestamp(),
+        awardAcceptedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
 
-      // ⭐ Write deliveryDetails/{requestId}
-      await setDoc(doc(db, "deliveryDetails", request.id), deliveryDetailsData);
+      // 🔵 Write deliveryDetails/{requestId}
+      await setDoc(
+        doc(db, "deliveryDetails", request.id),
+        deliveryPayload,
+        { merge: true }
+      );
 
-      // ⭐ Update original request
+      // 🟢 Update request/{requestId}
       await updateDoc(doc(db, "requests", request.id), {
         status: "accepted",
         deliveryStatus: "accepted",
@@ -81,144 +78,124 @@ const AddressConfirmationModal = ({ open, onClose, request }) => {
         updatedAt: serverTimestamp(),
       });
 
-      // UI feedback
-      setTimeout(() => {
-        window?.toast?.success?.(
-          "🎉 Delivery details confirmed! Admin will contact you for pickup."
-        );
-      }, 0);
+      // Let MyActivity handle notifications via Cloud Functions
+      onConfirm?.(request);
 
-      // Reset UI state
-      onClose();
+      window?.toast?.success?.("🎉 Delivery details confirmed!");
+
+      // Reset UI
       setAddress("");
       setPhone("");
       setInstructions("");
+      onClose();
+
     } catch (err) {
-      console.error("❌ Address confirmation error:", err);
-      setError("Failed to confirm delivery: " + err.message);
+      console.error("❌ Address Confirm Error:", err);
+      setError("Failed to save delivery details: " + err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleClose = () => {
-    if (!loading) {
-      setError("");
-      onClose();
-    }
-  };
-
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-lg max-w-md w-full max-h-[90vh] overflow-hidden">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[999]">
+      <div className="bg-white rounded-xl max-w-md w-full shadow-xl overflow-hidden">
+        
         {/* HEADER */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+        <div className="p-6 border-b flex items-center justify-between">
           <div>
             <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
               <MapPin className="w-5 h-5 text-blue-600" />
               Confirm Delivery Details
             </h2>
             <p className="text-sm text-gray-600 mt-1">
-              Provide delivery information for:{" "}
+              For item:{" "}
               <strong>
-                {request?.itemName ||
-                  request?.itemData?.title ||
-                  request?.itemTitle ||
+                {request.itemData?.title ||
+                  request.itemName ||
+                  request.itemTitle ||
                   "Unknown Item"}
               </strong>
             </p>
           </div>
 
           <button
-            onClick={handleClose}
-            disabled={loading}
+            onClick={!loading ? onClose : undefined}
             className="text-gray-400 hover:text-gray-600 disabled:opacity-50"
           >
-            <X className="w-6 h-6" />
+            <X size={20} />
           </button>
         </div>
 
         {/* BODY */}
-        <div className="p-6 overflow-y-auto">
+        <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
-              <p className="font-medium">Error</p>
-              <p className="text-sm">{error}</p>
+            <div className="bg-red-50 text-red-700 border border-red-200 p-3 rounded-lg">
+              {error}
             </div>
           )}
 
-          <div className="space-y-4">
-            {/* Address Input */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-                <MapPin className="w-4 h-4" />
-                Delivery Address *
-              </label>
-              <textarea
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                rows={3}
-                placeholder="Enter your full address..."
-                disabled={loading}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 resize-none"
-              />
-            </div>
+          {/* Address */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+              <MapPin className="w-4 h-4" /> Delivery Address *
+            </label>
+            <textarea
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              rows={3}
+              placeholder="Full delivery address..."
+              className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
 
-            {/* Phone Input */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-                <Phone className="w-4 h-4" />
-                Phone Number *
-              </label>
-              <input
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                type="tel"
-                placeholder="Phone number for courier contact"
-                disabled={loading}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+          {/* Phone */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+              <Phone className="w-4 h-4" /> Phone Number *
+            </label>
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="Courier contact number"
+              className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
 
-            {/* Instructions Input */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-                <MessageSquare className="w-4 h-4" />
-                Delivery Instructions (Optional)
-              </label>
-              <textarea
-                value={instructions}
-                onChange={(e) => setInstructions(e.target.value)}
-                rows={2}
-                placeholder="Landmarks, gate code, preferred time…"
-                disabled={loading}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 resize-none"
-              />
-            </div>
+          {/* Instructions */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+              <MessageSquare className="w-4 h-4" /> Instructions (Optional)
+            </label>
+            <textarea
+              rows={2}
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              placeholder="Landmarks, gate code, notes..."
+              className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+            />
           </div>
         </div>
 
         {/* FOOTER */}
-        <div className="flex justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
+        <div className="p-6 bg-gray-50 border-t flex justify-end gap-3">
           <button
-            onClick={handleClose}
             disabled={loading}
-            className="px-4 py-2 bg-white border rounded-lg text-gray-700 disabled:opacity-50"
+            onClick={onClose}
+            className="px-4 py-2 bg-white border rounded-lg text-gray-700"
           >
             Cancel
           </button>
 
           <button
-            onClick={handleSubmit}
             disabled={loading || !address.trim() || !phone.trim()}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg flex items-center gap-2 disabled:opacity-50"
+            onClick={handleSubmit}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg flex items-center gap-2"
           >
             {loading ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Confirming…
+                <Loader2 className="w-4 h-4 animate-spin" /> Saving…
               </>
             ) : (
               "Confirm Delivery"

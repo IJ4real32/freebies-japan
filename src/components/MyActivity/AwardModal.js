@@ -1,10 +1,13 @@
+// ✅ FILE: src/components/MyActivity/AwardModal.jsx (PHASE-2 FINAL)
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Award, CheckCircle, XCircle } from 'lucide-react';
 import ActionButton from './ActionButton';
 
 const AwardModal = ({ open, onClose, item, onAccept, onDecline, loading }) => {
-  if (!open || !item) return null;
+  
+  // ❗ Safety: Premium items must NEVER trigger AwardModal
+  if (!open || !item || item?.itemData?.type === "premium") return null;
 
   return (
     <AnimatePresence>
@@ -22,14 +25,15 @@ const AwardModal = ({ open, onClose, item, onAccept, onDecline, loading }) => {
             transition={{ type: 'spring', damping: 25 }}
             className="bg-gradient-to-br from-purple-500 via-indigo-500 to-blue-600 rounded-3xl shadow-2xl max-w-md w-full p-8 text-center text-white relative overflow-hidden"
           >
-            {/* Confetti Background */}
+
+            {/* Decorative Confetti */}
             <div className="absolute inset-0 opacity-20">
               {[...Array(25)].map((_, i) => (
                 <motion.div
                   key={i}
                   className="absolute w-2 h-2 bg-yellow-300 rounded-full"
                   initial={{ y: -20, x: Math.random() * 100, opacity: 0 }}
-                  animate={{ 
+                  animate={{
                     y: ['0%', '-100%', '0%'],
                     x: [Math.random() * 100, Math.random() * 100],
                     opacity: [0, 1, 0],
@@ -52,6 +56,8 @@ const AwardModal = ({ open, onClose, item, onAccept, onDecline, loading }) => {
             </button>
 
             <div className="relative z-10">
+              
+              {/* Award Icon */}
               <motion.div
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
@@ -60,7 +66,7 @@ const AwardModal = ({ open, onClose, item, onAccept, onDecline, loading }) => {
               >
                 <Award className="w-12 h-12 text-yellow-300" />
               </motion.div>
-              
+
               <motion.h3
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -69,7 +75,7 @@ const AwardModal = ({ open, onClose, item, onAccept, onDecline, loading }) => {
               >
                 Congratulations! 🎉
               </motion.h3>
-              
+
               <motion.p
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -78,7 +84,7 @@ const AwardModal = ({ open, onClose, item, onAccept, onDecline, loading }) => {
               >
                 You've been awarded:
               </motion.p>
-              
+
               <motion.p
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -87,16 +93,17 @@ const AwardModal = ({ open, onClose, item, onAccept, onDecline, loading }) => {
               >
                 {item.itemData?.title || item.itemTitle || 'Unknown Item'}
               </motion.p>
-              
+
               <motion.p
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.6 }}
                 className="text-white/80 text-sm mb-8"
               >
-                Please confirm delivery acceptance to proceed with pickup
+                Please confirm delivery acceptance to proceed with pickup.
               </motion.p>
-              
+
+              {/* Accept / Decline Buttons */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -113,6 +120,7 @@ const AwardModal = ({ open, onClose, item, onAccept, onDecline, loading }) => {
                 >
                   Accept Delivery
                 </ActionButton>
+
                 <ActionButton
                   variant="outline"
                   icon={XCircle}
@@ -124,6 +132,7 @@ const AwardModal = ({ open, onClose, item, onAccept, onDecline, loading }) => {
                   Decline Offer
                 </ActionButton>
               </motion.div>
+
             </div>
           </motion.div>
         </motion.div>

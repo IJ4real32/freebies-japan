@@ -1,4 +1,5 @@
-// ✅ FILE: src/App.js (FULLY CLEANED + SUBSCRIPTION BANNER FIXED)
+// ✅ FILE: src/App.js (PHASE 2 — FINAL ROUTE UPGRADE)
+
 import React, { useEffect, useState } from "react";
 import {
   BrowserRouter as Router,
@@ -8,15 +9,19 @@ import {
   useLocation,
   Navigate,
 } from "react-router-dom";
+
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./firebase";
 
+/* ---------------- Context Providers ---------------- */
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { LanguageProvider } from "./contexts/LanguageContext";
 
+/* ---------------- Route Guards ---------------- */
 import PrivateRoute from "./routes/PrivateRoute";
 import PrivateRouteAdmin from "./routes/PrivateRouteAdmin";
 
+/* ---------------- UI ---------------- */
 import Navbar from "./components/UI/Navbar";
 import SubscriptionBanner from "./components/UI/SubscriptionBanner";
 import { Toaster } from "react-hot-toast";
@@ -27,7 +32,7 @@ import WelcomeBack from "./pages/WelcomeBack";
 import Home from "./pages/Home";
 import Items from "./pages/Items";
 import Donate from "./pages/Donate";
-import MyActivity from "./pages/MyActivity";
+import MyActivity from "./pages/MyActivity";             // 🚀 Phase 2 Compatible
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Profile from "./pages/Profile";
@@ -37,39 +42,46 @@ import DepositInstructions from "./pages/DepositInstructions";
 import AdminLogin from "./pages/AdminLogin";
 import Unauthorized from "./pages/Unauthorized";
 import HealthCheck from "./pages/HealthCheck";
+
 import AdminDashboard from "./pages/AdminDashboard";
 import RequestsAdmin from "./pages/RequestsAdmin";
 import AdminManageItems from "./pages/AdminManageItems";
 import AdminItemDetail from "./pages/AdminItemDetail";
+
 import AdminUsers from "./pages/AdminUsers";
 import AdminLotteryDashboard from "./pages/AdminLotteryDashboard";
+
 import AdminPaymentsQueue from "./pages/AdminPaymentsQueue";
 import AdminPaymentDetails from "./pages/AdminPaymentDetails";
-import AdminMoneyDonations from "./pages/AdminMoneyDonations";
+
 import AdminMoneyDonationsList from "./pages/AdminMoneyDonationsList";
+import AdminMoneyDonations from "./pages/AdminMoneyDonations";
+
 import AdminPickups from "./pages/AdminPickups";
 import AdminDonate from "./pages/AdminDonate";
 
 /* ---------------- Debug ---------------- */
 import { verifyFirestoreIndexes } from "./firebaseIndexHelper";
-
 if (process.env.NODE_ENV === "development") {
   verifyFirestoreIndexes();
 }
 
-/* ---------------- Body CSS Controller ---------------- */
+/* ==========================================================
+   BODY CLASS CONTROLLER (Admin Mode UI toggle)
+========================================================== */
 function BodyClassController() {
   const location = useLocation();
-
   useEffect(() => {
     const isAdmin = location.pathname.startsWith("/admin");
     document.body.classList.toggle("admin-mode", isAdmin);
   }, [location.pathname]);
-
   return null;
 }
 
-/* ---------------- Auth Redirect Controller ---------------- */
+/* ==========================================================
+   AUTH REDIRECT HANDLER
+   Handles: navbar, onboarding, welcome-back logic
+========================================================== */
 function AuthRedirectController({ setShowNavbar }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -79,17 +91,14 @@ function AuthRedirectController({ setShowNavbar }) {
       const path = location.pathname;
       const isAdminPage = path.startsWith("/admin");
 
-      // Hide navbar on these public pages
-      const publicHideNavbar = ["/onboarding", "/login", "/signup", "/admin"];
+      const hideNavbarPages = ["/onboarding", "/login", "/signup", "/admin"];
 
       if (user) {
+        // Logged-in User
         setShowNavbar(!isAdminPage);
 
-        /* -------- Onboarding Logic -------- */
-        const seenOnboarding =
-          localStorage.getItem("hasSeenOnboarding") === "true";
-        const seenWelcome =
-          sessionStorage.getItem("hasSeenWelcome") === "true";
+        const seenOnboarding = localStorage.getItem("hasSeenOnboarding") === "true";
+        const seenWelcomeBack = sessionStorage.getItem("hasSeenWelcome") === "true";
 
         if (!seenOnboarding) {
           localStorage.setItem("hasSeenOnboarding", "true");
@@ -97,27 +106,20 @@ function AuthRedirectController({ setShowNavbar }) {
           return;
         }
 
-        if (!seenWelcome) {
+        if (!seenWelcomeBack) {
           sessionStorage.setItem("hasSeenWelcome", "true");
           navigate("/welcome-back", { replace: true });
           return;
         }
 
-        const publicPages = [
-          "/login",
-          "/signup",
-          "/welcome-back",
-          "/onboarding",
-          "/admin-login",
-        ];
-
+        // Don’t leave user on login pages
+        const publicPages = ["/login", "/signup", "/welcome-back", "/onboarding", "/admin-login"];
         if (publicPages.some((p) => path.startsWith(p))) {
           navigate("/items", { replace: true });
         }
       } else {
-        // Logged out
-        setShowNavbar(!publicHideNavbar.some((p) => path.startsWith(p)));
-
+        // Logged OUT
+        setShowNavbar(!hideNavbarPages.some((p) => path.startsWith(p)));
         if (path === "/") navigate("/onboarding", { replace: true });
       }
     });
@@ -126,20 +128,22 @@ function AuthRedirectController({ setShowNavbar }) {
   return null;
 }
 
-/* ---------------- Subscription Banner Controller ---------------- */
+/* ==========================================================
+   SUBSCRIPTION BANNER CONTROLLER (Phase 2 logic intact)
+========================================================== */
 function BannerController({ setShowBanner }) {
   const location = useLocation();
   const { currentUser } = useAuth();
 
   useEffect(() => {
     const path = location.pathname;
-    const loggedIn = !!currentUser;
     const isAdmin = path.startsWith("/admin");
+    const loggedIn = !!currentUser;
     const bannerClosed = localStorage.getItem("bannerClosed") === "true";
 
     if (loggedIn && !isAdmin) {
       if (path.startsWith("/items")) {
-        // Reset on items page
+        // Fresh reset when entering Items page
         setShowBanner(true);
         localStorage.removeItem("bannerClosed");
       } else {
@@ -153,14 +157,16 @@ function BannerController({ setShowBanner }) {
   return null;
 }
 
-/* ---------------- Main App ---------------- */
+/* ==========================================================
+   🌐 MAIN APPLICATION COMPONENT
+========================================================== */
 function App() {
   const [showNavbar, setShowNavbar] = useState(false);
   const [showBanner, setShowBanner] = useState(false);
 
   return (
     <>
-      {/* Controllers */}
+      {/* State Controllers */}
       <AuthRedirectController setShowNavbar={setShowNavbar} />
       <BannerController setShowBanner={setShowBanner} />
       <BodyClassController />
@@ -168,27 +174,31 @@ function App() {
       {/* Navbar */}
       {showNavbar && <Navbar />}
 
-      {/* Banner (non-admin only) */}
+      {/* Subscription Banner */}
       {showNavbar && showBanner && (
         <div className="relative z-[40]">
-    <div className="mt-[56px] md:mt-[64px]"></div>
+          <div className="mt-[56px] md:mt-[64px]"></div>
           <SubscriptionBanner />
         </div>
       )}
 
-      {/* Routes */}
+      {/* =====================================================
+         ROUTES — PHASE 2 READY
+      ===================================================== */}
       <Routes>
-        {/* Public */}
+        {/* -------- Public Routes -------- */}
         <Route path="/" element={<OnboardingSlides />} />
         <Route path="/onboarding" element={<OnboardingSlides />} />
         <Route path="/welcome-back" element={<WelcomeBack />} />
+
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+
         <Route path="/unauthorized" element={<Unauthorized />} />
         <Route path="/admin-login" element={<AdminLogin />} />
         <Route path="/health" element={<HealthCheck />} />
 
-        {/* Authenticated User Routes */}
+        {/* -------- Authenticated User Routes -------- */}
         <Route
           path="/home"
           element={
@@ -202,7 +212,7 @@ function App() {
           path="/items"
           element={
             <PrivateRoute>
-              <Items />
+              <Items />    {/* 🚀 Phase 2 Premium + Free Items */}
             </PrivateRoute>
           }
         />
@@ -220,7 +230,7 @@ function App() {
           path="/myactivity"
           element={
             <PrivateRoute>
-              <MyActivity />
+              <MyActivity />  {/* 🚀 Phase 2 Delivery Flow Integrated */}
             </PrivateRoute>
           }
         />
@@ -243,7 +253,7 @@ function App() {
           }
         />
 
-        {/* Admin Routes */}
+        {/* -------- ADMIN ROUTES (Phase 2 Compatible) -------- */}
         <Route
           path="/admin"
           element={
@@ -352,16 +362,19 @@ function App() {
           }
         />
 
-        {/* Fallback */}
+        {/* -------- Fallback -------- */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
+      {/* Global Toasts */}
       <Toaster position="top-center" />
     </>
   );
 }
 
-/* ---------------- Wrapper ---------------- */
+/* ==========================================================
+   WRAPPER (Providers + Router)
+========================================================== */
 export default function AppWrapper() {
   return (
     <Router>

@@ -1,30 +1,34 @@
-// ✅ FILE: src/services/functionsApi.js
-// Unified client for Firebase Cloud Functions (Gen 2)
+// =====================================================
+//  PHASE 2 – Functions API Client (FINAL, CLEAN BUILD)
+// =====================================================
 
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { auth, app } from "../firebase";
+import app, { auth } from "../firebase";
 
-/* =====================================================
-   ✅ Initialize Functions
-   ===================================================== */
+// -----------------------------------------------------
+// Region-locked Functions Instance
+// -----------------------------------------------------
 const functionsRegion = getFunctions(app, "asia-northeast1");
 
-/* =====================================================
-   ✅ Core Helpers
-   ===================================================== */
+// -----------------------------------------------------
+// Auth Token Helper
+// -----------------------------------------------------
 async function ensureFreshIdToken(optional = false) {
-  const u = auth.currentUser;
-  if (!u) {
+  const user = auth.currentUser;
+
+  if (!user) {
     if (optional) return null;
-    throw new Error("unauthenticated: Please sign in");
+    throw new Error("Unauthenticated — please log in.");
   }
-  return await u.getIdToken(true);
+
+  return await user.getIdToken(true);
 }
 
-/* =====================================================
-   ✅ Deposit / Payments
-   ===================================================== */
-export const createDeposit = async ({
+// =====================================================
+// PREMIUM DEPOSIT WORKFLOW
+// =====================================================
+
+export const createDepositRequest = async ({
   itemId,
   amount,
   method = "bank_transfer",
@@ -32,10 +36,9 @@ export const createDeposit = async ({
   deliveryInfo,
   note = "",
 }) => {
-  if (!itemId || typeof amount !== "number")
-    throw new Error("itemId and amount are required");
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "createDepositRequest");
+
   const res = await callable({
     itemId,
     amount,
@@ -45,26 +48,50 @@ export const createDeposit = async ({
     deliveryInfo,
     note,
   });
+
   return res?.data || { ok: false };
 };
 
-export const reportDeposit = async (payload = {}) => {
+// alias
+export const createDeposit = createDepositRequest;
+
+export const reportDeposit = async (payload) => {
+  await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "reportDeposit");
   const res = await callable(payload);
   return res?.data || { ok: false };
 };
 
-export const getPaymentDetails = async ({ paymentId }) => {
-  if (!paymentId) throw new Error("paymentId is required");
-  await ensureFreshIdToken(true);
-  const callable = httpsCallable(functionsRegion, "adminGetPaymentDetails");
-  const res = await callable({ paymentId });
+// =====================================================
+// PREMIUM STATUS WORKFLOW
+// =====================================================
+
+export const updatePremiumStatus = async ({ itemId, status }) => {
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "updatePremiumStatus");
+  const res = await callable({ itemId, status });
   return res?.data || { ok: false };
 };
 
-/* =====================================================
-   ✅ Trial Credit Functions
-   ===================================================== */
+export const cancelPremiumTransaction = async ({ itemId, reason }) => {
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "cancelPremiumTransaction");
+  const res = await callable({ itemId, reason });
+  return res?.data || { ok: false };
+};
+
+// =====================================================
+// FREE REQUEST WORKFLOW
+// =====================================================
+
+export const onRequestCreateAddTicket = async ({ itemId }) => {
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "onRequestCreateAddTicket");
+  const res = await callable({ itemId });
+  return res?.data || { ok: false };
+};
+
+// decrement trial credit
 export const decrementTrialCredit = async () => {
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "decrementTrialCredit");
@@ -72,17 +99,84 @@ export const decrementTrialCredit = async () => {
   return res?.data || { ok: false };
 };
 
-export const adminResetTrialCredits = async ({ targetUid, credits = 5 }) => {
-  if (!targetUid) throw new Error("targetUid is required");
+// =====================================================
+// DELIVERY WORKFLOW
+// =====================================================
+
+export const submitDeliveryDetails = async ({
+  requestId,
+  deliveryAddress,
+  deliveryPhone,
+  deliveryInstructions = "",
+}) => {
   await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "resetTrialCredits");
-  const res = await callable({ targetUid, credits });
+  const callable = httpsCallable(functionsRegion, "submitDeliveryDetails");
+
+  const res = await callable({
+    requestId,
+    deliveryAddress: deliveryAddress.trim(),
+    deliveryPhone: deliveryPhone.trim(),
+    deliveryInstructions,
+    submittedAt: new Date().toISOString(),
+  });
+
   return res?.data || { ok: false };
 };
 
-/* =====================================================
-   ✅ Admin Payments & Deposits
-   ===================================================== */
+export const recipientConfirmDelivery = async ({ donationId, accepted }) => {
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "recipientConfirmDelivery");
+  const res = await callable({ donationId, accepted });
+  return res?.data || { ok: false };
+};
+
+export const triggerShipmentBooking = async ({ donationId }) => {
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "triggerShipmentBooking");
+  const res = await callable({ donationId });
+  return res?.data || { ok: false };
+};
+
+export const cancelDonationForDonor = async ({ donationId, reason }) => {
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "onDonationCancel");
+  const res = await callable({ donationId, reason });
+  return res?.data || { ok: false };
+};
+
+// =====================================================
+// ADMIN: FREE ITEM REQUEST MODERATION
+// =====================================================
+
+export const adminUpdateRequestStatus = async ({
+  requestId,
+  status,
+  note = "",
+}) => {
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "onRequestStatusUpdate");
+  const res = await callable({ requestId, status, note });
+  return res?.data || { ok: false };
+};
+
+export const adminRunLottery = async ({ itemId }) => {
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "adminRunLottery");
+  const res = await callable({ itemId });
+  return res?.data || { ok: false };
+};
+
+export const adminRelistDonation = async ({ donationId }) => {
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "adminRelistDonation");
+  const res = await callable({ donationId });
+  return res?.data || { ok: false };
+};
+
+// =====================================================
+// ADMIN: PAYMENT QUEUE / DEPOSITS
+// =====================================================
+
 export const adminGetPaymentQueue = async (status, limit = 100) => {
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "adminGetPaymentQueue");
@@ -90,8 +184,14 @@ export const adminGetPaymentQueue = async (status, limit = 100) => {
   return res?.data || { ok: false };
 };
 
+export const getPaymentDetails = async ({ paymentId }) => {
+  await ensureFreshIdToken(true);
+  const callable = httpsCallable(functionsRegion, "adminGetPaymentDetails");
+  const res = await callable({ paymentId });
+  return res?.data || { ok: false };
+};
+
 export const adminApproveDeposit = async ({ paymentId, reportId }) => {
-  if (!paymentId) throw new Error("paymentId required");
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "approveDeposit");
   const res = await callable({ paymentId, reportId });
@@ -99,68 +199,29 @@ export const adminApproveDeposit = async ({ paymentId, reportId }) => {
 };
 
 export const adminRejectDeposit = async ({ paymentId, reportId, reason }) => {
-  if (!paymentId) throw new Error("paymentId required");
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "rejectDeposit");
   const res = await callable({ paymentId, reportId, reason });
   return res?.data || { ok: false };
 };
 
-/* =====================================================
-   ✅ Admin: Donations, Lottery, Relist, Sponsored
-   ===================================================== */
-export const adminEndDonationEarly = async ({ itemId }) => {
-  if (!itemId) throw new Error("itemId required");
+// for delivery confirmation in the admin panel
+export const markPaymentDelivered = async ({ paymentId }) => {
   await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "onDonationEndEarly");
-  const res = await callable({ itemId });
+  const callable = httpsCallable(functionsRegion, "markPaymentDelivered");
+  const res = await callable({ paymentId });
   return res?.data || { ok: false };
 };
 
-export const adminRunLottery = async ({ allExpired = false, itemId = null } = {}) => {
-  await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "adminRunLottery");
-  const res = await callable({ allExpired, itemId });
-  return res?.data || { ok: false };
-};
+// =====================================================
+// ADMIN: MONEY DONATIONS
+// =====================================================
 
-export const adminRelistDonation = async ({ donationId, durationHours = 48 }) => {
-  if (!donationId) throw new Error("donationId is required");
-  await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "adminRelistDonation");
-  const res = await callable({ donationId, durationHours });
-  return res?.data || { ok: false };
-};
-
-export const adminCreateSponsoredDonation = async ({
-  title,
-  description = "",
-  images = [],
-  durationHours = 48,
-}) => {
-  if (!title) throw new Error("title is required");
-  await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "adminCreateSponsoredDonation");
-  const res = await callable({
-    title,
-    description,
-    images,
-    durationHours,
-    status: "active",
-  });
-  return res?.data || { ok: false };
-};
-
-/* =====================================================
-   ✅ Money Donations
-   ===================================================== */
 export const createMoneyDonation = async ({
-  amountJPY = 1500,
-  message = "Platform maintenance donation",
-  proofUrl = null,
+  amountJPY,
+  message,
+  proofUrl,
 }) => {
-  if (!amountJPY || amountJPY < 100)
-    throw new Error("amountJPY must be at least 100 yen.");
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "createMoneyDonation");
   const res = await callable({ amountJPY, message, proofUrl });
@@ -169,104 +230,57 @@ export const createMoneyDonation = async ({
 
 export const adminGetMoneyDonationsQueue = async (status, limit = 100) => {
   await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "getMoneyDonationsQueue_Admin");
+  const callable = httpsCallable(
+    functionsRegion,
+    "getMoneyDonationsQueue_Admin"
+  );
   const res = await callable({ status, limit });
   return res?.data || { ok: false };
 };
 
-export const adminVerifyMoneyDonation = async ({ donationId, verify, note = "" }) => {
-  if (!donationId) throw new Error("donationId is required");
+export const adminVerifyMoneyDonation = async ({
+  donationId,
+  verify,
+  note,
+}) => {
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "verifyMoneyDonation_Admin");
   const res = await callable({ donationId, verify, note });
   return res?.data || { ok: false };
 };
 
-/* =====================================================
-   ✅ COD Delivery (Admin)
-   ===================================================== */
-export const markPaymentDelivered = async ({ paymentId }) => {
-  if (!paymentId) throw new Error("paymentId required");
-  await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "markPaymentDelivered");
-  const res = await callable({ paymentId });
-  return res?.data || { ok: false };
-};
+// =====================================================
+// NOTIFICATIONS
+// =====================================================
 
-/* =====================================================
-   ✅ Requests / Notifications
-   ===================================================== */
-export const adminUpdateRequestStatus = async ({ requestId, status, note = "" }) => {
-  if (!requestId || !status) throw new Error("requestId and status required");
-  await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "onRequestStatusUpdate");
-  const res = await callable({ requestId, status, note });
-  return res?.data || { ok: false };
-};
-
-export const sendAdminItemStatusEmail = async ({
-  requestId,
-  status,
-  userEmail,
-  itemTitle,
-  note,
-}) => {
-  if (!userEmail || !requestId || !status)
-    throw new Error("userEmail, requestId, and status required");
-  await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "sendAdminItemStatusEmail");
-  const res = await callable({ requestId, status, userEmail, itemTitle, note });
-  return res?.data || { ok: false };
-};
-
-/* =====================================================
-   ✅ Logistics: Delivery & Shipment (Phase 2)
-   ===================================================== */
-export const recipientConfirmDelivery = async ({ donationId, accepted }) => {
-  if (!donationId) throw new Error("donationId required");
-  await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "recipientConfirmDelivery");
-  const res = await callable({ donationId, accepted });
-  return res?.data || { ok: false };
-};
-
-export const triggerShipmentBooking = async ({ donationId }) => {
-  if (!donationId) throw new Error("donationId required");
-  await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "triggerShipmentBooking");
-  const res = await callable({ donationId });
-  return res?.data || { ok: false };
-};
-
-// ✅ Donor cancels a live donation manually (front-end MyActivity)
-export const cancelDonationForDonor = async ({ donationId, reason = "donor_closed" }) => {
-  if (!donationId) throw new Error("donationId required");
-  await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "onDonationCancel");
-  const res = await callable({ donationId, reason });
-  return res?.data || { ok: false };
-};
-
-// ✅ Platform notification sender (SendGrid + in-app)
-export const sendPlatformNotification = async ({
-  type,
-  to,
-  username = "",
-  itemTitle = "",
-  html = "",
-}) => {
-  if (!type || !to) throw new Error("type and to required");
+export const sendPlatformNotification = async (payload) => {
   await ensureFreshIdToken(true);
   const callable = httpsCallable(functionsRegion, "sendPlatformNotification");
-  const res = await callable({ type, to, username, itemTitle, html });
+  const res = await callable(payload);
   return res?.data || { ok: false };
 };
 
-/* =====================================================
-   ✅ Health Check
-   ===================================================== */
+export const sendAdminItemStatusEmail = async (payload) => {
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "sendAdminItemStatusEmail");
+  const res = await callable(payload);
+  return res?.data || { ok: false };
+};
+
+export const sendUserItemStatusUpdate = async (payload) => {
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "sendUserItemStatusUpdate");
+  const res = await callable(payload);
+  return res?.data || { ok: false };
+};
+
+// =====================================================
+// HEALTH CHECK
+// =====================================================
+
 export const ping = async () => {
   const token = await ensureFreshIdToken(true).catch(() => null);
+
   const res = await fetch(
     "https://asia-northeast1-freebies-japan-v2.cloudfunctions.net/ping",
     {
@@ -278,9 +292,10 @@ export const ping = async () => {
       body: JSON.stringify({ ts: Date.now() }),
     }
   );
+
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Ping failed: ${res.status} ${text}`);
+    throw new Error(`Ping failed: ${res.status}`);
   }
-  return await res.json();
+
+  return res.json();
 };
