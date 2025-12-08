@@ -15,6 +15,9 @@ import {
 } from "lucide-react";
 import StatusBadge from "./StatusBadge";
 
+// Allowed delete statuses (your confirmed rule)
+const ALLOW_DELETE = ["declined", "completed", "delivered"];
+
 export default function RequestCard({
   item,
   onView,
@@ -23,30 +26,21 @@ export default function RequestCard({
   deleting,
 }) {
   // ============================================================
-  // 1. SAFETY — IGNORE premium (MyActivity filters but recheck here)
+  // 1. SAFETY — Ignore premium (MyActivity filters but recheck here)
   // ============================================================
   if (!item || item?.itemData?.type === "premium") return null;
 
   // ============================================================
-  // 2. DELETE RULES (Phase-2 Delivery Lock)
+  // 2. DELETE RULES  (FINAL LOGIC)
   // ============================================================
-  const DELIVERY_LOCK = [
-    "accepted",
-    "pickup_scheduled",
-    "in_transit",
-    "out_for_delivery",
-    "delivered",
-    "completed",
-  ];
-
-  const canDelete = !DELIVERY_LOCK.includes(item.deliveryStatus);
+  const canDelete = ALLOW_DELETE.includes(item.status);
 
   // ============================================================
-  // 3. AWARD FLOW — only if free + awarded && NOT already moving
+  // 3. AWARD FLOW — only if free + awarded and not already accepted
   // ============================================================
   const showAwardAction =
     item.status === "awarded" &&
-    !DELIVERY_LOCK.includes(item.deliveryStatus);
+    !["accepted", "completed"].includes(item.deliveryStatus);
 
   // ============================================================
   // 4. HELPERS
@@ -70,7 +64,7 @@ export default function RequestCard({
     }
   };
 
-  // Prevent opening drawer if clicking action buttons
+  // Prevent drawer open when clicking action buttons
   const handleCardClick = (e) => {
     if (e.target.closest(".action-button")) return;
     onView();
@@ -88,6 +82,7 @@ export default function RequestCard({
 
   const handleDelete = (e) => {
     e.stopPropagation();
+    if (!canDelete) return;
     onDelete(item);
   };
 
@@ -121,8 +116,8 @@ export default function RequestCard({
 
       {/* ====================== ACTION BUTTONS ====================== */}
       <div className="absolute top-3 right-3 z-20 flex gap-2">
-
-        {/* ==== Accept / Decline Award ==== */}
+        
+        {/* Accept / Decline Award */}
         {showAwardAction && (
           <div className="flex gap-1 action-button">
             <button
@@ -141,7 +136,7 @@ export default function RequestCard({
           </div>
         )}
 
-        {/* ==== DELETE ==== */}
+        {/* DELETE — Based ONLY on ALLOW_DELETE rule */}
         {canDelete && (
           <button
             onClick={handleDelete}
@@ -176,7 +171,6 @@ export default function RequestCard({
 
       {/* ====================== BODY ====================== */}
       <div className="p-4">
-
         <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2">
           {getTitle()}
         </h3>
@@ -193,55 +187,6 @@ export default function RequestCard({
           />
           <span className="text-xs text-gray-500">{getDate()}</span>
         </div>
-
-        {/* ================== DELIVERY PROGRESS ================== */}
-        {DELIVERY_LOCK.includes(item.deliveryStatus) && (
-          <div className="mt-3 pt-3 border-t border-gray-100 text-xs">
-            <div className="flex items-center gap-2 font-medium text-gray-700">
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{
-                  background:
-                    item.deliveryStatus === "accepted"
-                      ? "#3b82f6"
-                      : item.deliveryStatus === "pickup_scheduled"
-                      ? "#f59e0b"
-                      : item.deliveryStatus === "in_transit"
-                      ? "#8b5cf6"
-                      : item.deliveryStatus === "out_for_delivery"
-                      ? "#fbbf24"
-                      : item.deliveryStatus === "delivered"
-                      ? "#16a34a"
-                      : "#065f46",
-                }}
-              />
-
-              {{
-                accepted: "Delivery Accepted",
-                pickup_scheduled: "Pickup Scheduled",
-                in_transit: "In Transit",
-                out_for_delivery: "Out for Delivery",
-                delivered: "Delivered",
-                completed: "Completed",
-              }[item.deliveryStatus] || "Processing"}
-            </div>
-
-            {/* Address */}
-            {item.deliveryAddress && (
-              <div className="mt-1 text-gray-500 truncate">
-                📍 {item.deliveryAddress}
-              </div>
-            )}
-
-            {/* Pickup Date */}
-            {item.pickupDate && (
-              <div className="mt-1 text-gray-500 flex items-center gap-1">
-                <Calendar size={10} />
-                {new Date(item.pickupDate).toLocaleDateString()}
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </motion.div>
   );

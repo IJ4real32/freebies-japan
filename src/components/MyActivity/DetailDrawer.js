@@ -15,7 +15,7 @@ import {
   Clock,
   Gift,
   ShoppingBag,
-  XCircle
+  XCircle,
 } from "lucide-react";
 
 import StatusBadge from "./StatusBadge";
@@ -25,7 +25,43 @@ import PremiumTimeline from "./PremiumTimeline";
 import PremiumActionPanel from "./PremiumActionPanel";
 
 // ----------------------------------------------------------------------
-// PREMIUM STATUS CONFIG — UNIFIED WITH PurchaseCard + MyActivity
+// UNIVERSAL IMAGE NORMALIZER (FULL DONATION-IMAGE SUPPORT)
+// ----------------------------------------------------------------------
+function resolveImages(data) {
+  if (!data) return ["/images/default-item.jpg"];
+
+  // 🔥 NEW — PREMIUM MUST READ FROM THE DONATION DOC
+  if (data.donation?.images?.length > 0) {
+    return data.donation.images;
+  }
+
+  // Free items or legacy merged items
+  if (data.images?.length > 0) {
+    return data.images;
+  }
+
+  // Secondary fallbacks
+  if (data.itemData?.images?.length > 0) {
+    return data.itemData.images;
+  }
+
+  if (Array.isArray(data.itemImages) && data.itemImages.length > 0) {
+    return data.itemImages;
+  }
+
+  if (typeof data.thumbnail === "string") {
+    return [data.thumbnail];
+  }
+
+  if (typeof data.image === "string") {
+    return [data.image];
+  }
+
+  return ["/images/default-item.jpg"];
+}
+
+// ----------------------------------------------------------------------
+// PREMIUM STATUS CONFIG
 // ----------------------------------------------------------------------
 const PremiumStatusConfig = {
   available: {
@@ -93,20 +129,19 @@ const PremiumStatusConfig = {
     badgeColor: "bg-gray-500 text-white",
     icon: Clock,
     canDelete: false,
-  }
+  },
 };
 
 // ========================================================================
 // MAIN COMPONENT
 // ========================================================================
-
 export default function DetailDrawer({
   open,
   onClose,
   data,
   drawerType,
   currentUser,
-  loadingStates,
+  loadingStates = {},
   onDelete,
   onAcceptAward,
   onDeclineAward,
@@ -119,23 +154,46 @@ export default function DetailDrawer({
 
   if (!open || !data) return null;
 
-  // ------------------------------------------------------------------
-  // User roles
-  // ------------------------------------------------------------------
   const isPremiumItem = data?.isPremium || data?.type === "premium";
-  const isBuyer = data?.userId === currentUser?.uid || data?.buyerId === currentUser?.uid;
+
+  const isBuyer =
+    data?.userId === currentUser?.uid || data?.buyerId === currentUser?.uid;
+
   const isOwner = data?.donorId === currentUser?.uid;
+
   const isRequester = data?.userId === currentUser?.uid;
 
-  // ------------------------------------------------------------------
-  // Premium status
-  // ------------------------------------------------------------------
   const premiumStatus = data?.premiumStatus || "unknown";
-  const statusConfig = PremiumStatusConfig[premiumStatus] || PremiumStatusConfig.unknown;
+  const statusConfig =
+    PremiumStatusConfig[premiumStatus] || PremiumStatusConfig.unknown;
 
-  // ------------------------------------------------------------------
-  // Delete permissions
-  // ------------------------------------------------------------------
+  // ----------------------------------------------------------------------
+  // Image selection
+  // ----------------------------------------------------------------------
+  const images = resolveImages(data);
+  const safeImage = images[imageIndex] || "/images/default-item.jpg";
+
+  // ----------------------------------------------------------------------
+  // Title / Description (now prioritizing donation doc)
+  // ----------------------------------------------------------------------
+  const donation = data.donation || {};
+
+  const title =
+    donation.title ||
+    data?.title ||
+    data?.itemData?.title ||
+    data?.itemTitle ||
+    "Untitled Item";
+
+  const description =
+    donation.description ||
+    data?.description ||
+    data?.itemData?.description ||
+    "No description available";
+
+  // ----------------------------------------------------------------------
+  // Permissions
+  // ----------------------------------------------------------------------
   const canDeletePremium =
     isPremiumItem &&
     isOwner &&
@@ -145,24 +203,14 @@ export default function DetailDrawer({
 
   const canDeleteFree =
     !isPremiumItem &&
-    ["expired", "cancelled", "completed", "delivered"].includes(
-      data?.status
-    );
+    ["expired", "cancelled", "completed", "delivered"].includes(data?.status);
 
-  // ------------------------------------------------------------------
-  // Confirm delivery permissions
-  // ------------------------------------------------------------------
   const canConfirmDeliveryFree =
     isRequester && data?.deliveryStatus === "delivered";
 
   const canConfirmDeliveryPremium =
-    isPremiumItem &&
-    isBuyer &&
-    premiumStatus === "inTransit";
+    isPremiumItem && isBuyer && premiumStatus === "inTransit";
 
-  // ------------------------------------------------------------------
-  // Relist permissions
-  // ------------------------------------------------------------------
   const canRelistPremium =
     isPremiumItem &&
     isOwner &&
@@ -170,132 +218,9 @@ export default function DetailDrawer({
       premiumStatus
     );
 
-  // ------------------------------------------------------------------
-  // Safe values
-  // ------------------------------------------------------------------
-  const images =
-    data?.images ||
-    data?.itemData?.images ||
-    ["/images/default-item.jpg"];
-
-  const safeImage = images[imageIndex];
-
-  const title =
-    data?.title ||
-    data?.itemData?.title ||
-    data?.itemTitle ||
-    "Untitled Item";
-
-  const description =
-    data?.description ||
-    data?.itemData?.description ||
-    "No description available";
-
   // ======================================================================
-  // PREMIUM SECTION
+  // UI RENDER
   // ======================================================================
-
-  const renderPremiumContent = () => (
-    <div className="space-y-6">
-
-      {/* Header card */}
-      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl p-5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <ShoppingBag className="w-6 h-6" />
-            <div>
-              <h3 className="text-lg font-bold">Premium Item</h3>
-              <p className="text-indigo-100 text-sm">Exclusive purchase</p>
-            </div>
-          </div>
-
-          <div className={`px-3 py-1 rounded-full ${statusConfig.badgeColor}`}>
-            {statusConfig.label}
-          </div>
-        </div>
-      </div>
-
-      {/* Timeline */}
-      <PremiumTimeline currentStatus={premiumStatus} />
-
-      {/* Action panel */}
-      <PremiumActionPanel
-        item={data}
-        onPremiumAction={onPremiumAction}
-        loading={loadingStates.premium === data.id}
-      />
-
-      {/* Confirm delivery */}
-      {canConfirmDeliveryPremium && (
-        <div className="bg-green-50 border border-green-200 rounded-xl p-5">
-          <h4 className="flex items-center gap-2 text-lg font-semibold text-green-800 mb-3">
-            <Package className="w-5 h-5" />
-            Confirm Delivery
-          </h4>
-
-          <p className="text-green-700 text-sm mb-4">
-            Please confirm once the item arrives.
-          </p>
-
-          <ActionButton
-            variant="success"
-            fullWidth
-            loading={loadingStates.premium === data.id}
-            onClick={() => onPremiumAction(data, "confirm_delivery")}
-          >
-            Confirm Received
-          </ActionButton>
-        </div>
-      )}
-    </div>
-  );
-
-  // ======================================================================
-  // FREE CONTENT
-  // ======================================================================
-
-  const renderFreeContent = () => (
-    <div className="space-y-6">
-
-      <div className="bg-gradient-to-r from-emerald-600 to-green-600 text-white rounded-xl p-5 flex items-center gap-3">
-        <Gift className="w-6 h-6" />
-        <h3 className="text-lg font-bold">Free Item</h3>
-      </div>
-
-      <DeliveryTimeline
-        status={data.status}
-        deliveryStatus={data.deliveryStatus}
-        pickupDate={data.pickupDate}
-      />
-
-      {canConfirmDeliveryFree && (
-        <div className="bg-green-50 border border-green-200 rounded-xl p-5">
-          <h4 className="flex items-center gap-2 text-lg font-semibold text-green-800 mb-3">
-            <Package className="w-5 h-5" />
-            Confirm Delivery
-          </h4>
-
-          <p className="text-green-700 text-sm mb-4">
-            Confirm once item is received.
-          </p>
-
-          <ActionButton
-            variant="success"
-            fullWidth
-            loading={loadingStates.confirm === data.id}
-            onClick={() => onConfirmDelivery(data)}
-          >
-            Confirm Received
-          </ActionButton>
-        </div>
-      )}
-    </div>
-  );
-
-  // ======================================================================
-  // MAIN UI
-  // ======================================================================
-
   return (
     <AnimatePresence>
       {open && (
@@ -306,8 +231,6 @@ export default function DetailDrawer({
           exit={{ opacity: 0 }}
           onClick={onClose}
         >
-
-          {/* DRAWER */}
           <motion.div
             onClick={(e) => e.stopPropagation()}
             initial={{ y: "100%", opacity: 0 }}
@@ -316,7 +239,6 @@ export default function DetailDrawer({
             transition={{ type: "spring", damping: 20, stiffness: 200 }}
             className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
           >
-
             {/* HEADER */}
             <div className="flex items-center justify-between p-6 border-b border-gray-200">
               <div className="flex items-center gap-4">
@@ -324,7 +246,9 @@ export default function DetailDrawer({
                   src={safeImage}
                   className="w-16 h-16 object-cover rounded-lg"
                   alt=""
-                  onError={(e) => (e.target.src = "/images/default-item.jpg")}
+                  onError={(e) =>
+                    (e.target.src = "/images/default-item.jpg")
+                  }
                 />
                 <div>
                   <h2 className="text-lg font-bold">{title}</h2>
@@ -350,12 +274,81 @@ export default function DetailDrawer({
                 />
               </div>
 
-              {isPremiumItem ? renderPremiumContent() : renderFreeContent()}
+              {isPremiumItem ? (
+                <>
+                  <PremiumTimeline currentStatus={premiumStatus} />
 
-              {/* DELETE */}
+                  <PremiumActionPanel
+                    item={data}
+                    onPremiumAction={onPremiumAction}
+                    loading={loadingStates.premium === data.id}
+                  />
+
+                  {canConfirmDeliveryPremium && (
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-5 mt-6">
+                      <h4 className="flex items-center gap-2 text-lg font-semibold text-green-800 mb-3">
+                        <Package className="w-5 h-5" />
+                        Confirm Delivery
+                      </h4>
+
+                      <p className="text-green-700 text-sm mb-4">
+                        Please confirm once you receive the item.
+                      </p>
+
+                      <ActionButton
+                        variant="success"
+                        fullWidth
+                        loading={loadingStates.premium === data.id}
+                        onClick={() => onPremiumAction(data, "confirm_delivery")}
+                      >
+                        Confirm Received
+                      </ActionButton>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="bg-gradient-to-r from-emerald-600 to-green-600 text-white rounded-xl p-5 flex items-center gap-3">
+                    <Gift className="w-6 h-6" />
+                    <h3 className="text-lg font-bold">Free Item</h3>
+                  </div>
+
+                  <DeliveryTimeline
+                    status={data.status}
+                    deliveryStatus={data.deliveryStatus}
+                    pickupDate={data.pickupDate}
+                  />
+
+                  {canConfirmDeliveryFree && (
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-5 mt-6">
+                      <h4 className="flex items-center gap-2 text-lg font-semibold text-green-800 mb-3">
+                        <Package className="w-5 h-5" />
+                        Confirm Delivery
+                      </h4>
+
+                      <p className="text-green-700 text-sm mb-4">
+                        Confirm once item is received.
+                      </p>
+
+                      <ActionButton
+                        variant="success"
+                        fullWidth
+                        loading={loadingStates.confirm === data.id}
+                        onClick={() => onConfirmDelivery(data)}
+                      >
+                        Confirm Received
+                      </ActionButton>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* DELETE BLOCK */}
               {(canDeletePremium || canDeleteFree) && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-5 mt-6">
-                  <h4 className="text-red-800 font-semibold mb-3">Remove Item</h4>
+                  <h4 className="text-red-800 font-semibold mb-3">
+                    Remove Item
+                  </h4>
 
                   <ActionButton
                     variant="danger"
@@ -371,7 +364,9 @@ export default function DetailDrawer({
               {/* RELIST PREMIUM */}
               {canRelistPremium && (
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 mt-6">
-                  <h4 className="text-blue-800 font-semibold mb-3">Relist Item</h4>
+                  <h4 className="text-blue-800 font-semibold mb-3">
+                    Relist Item
+                  </h4>
 
                   <ActionButton
                     variant="primary"

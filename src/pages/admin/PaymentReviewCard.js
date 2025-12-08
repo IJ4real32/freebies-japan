@@ -1,208 +1,267 @@
-// ✅ FILE: src/pages/Admin/PaymentReviewCard.jsx
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { doc, onSnapshot, getDoc } from 'firebase/firestore';
-import { getDownloadURL, ref } from 'firebase/storage';
-import { httpsCallable } from 'firebase/functions';
-import { db, storage, functions } from '../../firebase';
-import { X, CheckCircle2, XCircle, ExternalLink } from 'lucide-react';
+// ✅ FILE: src/pages/Admin/PaymentReviewCard.jsx (PHASE 2 — FINAL VERSION)
+import React, { useEffect, useState, useCallback } from "react";
+import {
+  getPaymentDetails,
+  adminApproveDeposit,
+  adminRejectDeposit,
+  markPaymentDelivered,
+} from "../../services/functionsApi";
 
-export default function PaymentReviewCard({ paymentId, onHandled }) {
+import { X, CheckCircle2, XCircle, ExternalLink, PackageCheck } from "lucide-react";
+import toast from "react-hot-toast";
+
+export default function PaymentReviewCard({ paymentId, ticketId, onHandled }) {
   const [payment, setPayment] = useState(null);
-  const [userMeta, setUserMeta] = useState(null);
-  const [proofURLs, setProofURLs] = useState([]);
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState('');
+  const [note, setNote] = useState("");
   const [open, setOpen] = useState(true);
 
-  const adminHandlePayment = useMemo(
-    () => httpsCallable(functions, 'adminHandlePayment'),
-    []
-  );
-
+  // -------------------------------------------------------
+  // LOAD PAYMENT DETAILS (Phase 2 backend)
+  // -------------------------------------------------------
   useEffect(() => {
-    if (!paymentId) return;
-    const unsub = onSnapshot(doc(db, 'payments', paymentId), async (snap) => {
-      if (!snap.exists()) return setPayment(null);
-      const p = { id: snap.id, ...snap.data() };
-      setPayment(p);
+    const load = async () => {
+      if (!paymentId) return;
 
-      if (p.userId) {
-        const u = await getDoc(doc(db, 'users', p.userId));
-        if (u.exists()) setUserMeta({ id: u.id, ...u.data() });
+      const res = await getPaymentDetails({ paymentId });
+
+      if (res?.payment) {
+        setPayment(res.payment);
+        setReports(res.reports || []);
+      } else {
+        toast.error("Failed to load payment details.");
       }
 
-      const paths = Array.isArray(p.proofPaths)
-        ? p.proofPaths
-        : p.proofPath
-        ? [p.proofPath]
-        : [];
-      const urls = await Promise.all(
-        paths.map(async (path) => {
-          try { return { path, url: await getDownloadURL(ref(storage, path)) }; }
-          catch { return { path, url: null }; }
-        })
-      );
-      setProofURLs(urls);
-    });
-    return () => unsub();
+      setLoading(false);
+    };
+
+    load();
   }, [paymentId]);
 
-  const handleDecision = useCallback(
-    async (decision) => {
-      if (!payment) return;
-      if (!window.confirm(`Are you sure you want to ${decision} this payment?`)) return;
-      setBusy(true);
-      try {
-        const payload = {
-          paymentId: payment.id,
-          action: decision === 'approve' ? 'approve' : 'reject',
-          adminNote: note || '',
-          grantDays: payment.type === 'subscription' ? 30 : undefined,
-        };
-        const { data } = await adminHandlePayment(payload);
-        if (data?.ok) {
-          onHandled?.(payment.id, decision);
-          setOpen(false);
-        } else {
-          throw new Error(data?.error || 'Server did not confirm change.');
-        }
-      } catch (err) {
-        console.error('adminHandlePayment error:', err);
-        alert(err?.message || 'Failed to update payment.');
-      } finally {
-        setBusy(false);
-      }
-    },
-    [adminHandlePayment, note, onHandled, payment]
-  );
+  // -------------------------------------------------------
+  // COD — Mark Delivered
+  // -------------------------------------------------------
+  const handleCODDelivered = useCallback(async () => {
+    if (!window.confirm("Mark this Cash On Delivery payment as delivered?")) return;
+    setBusy(true);
 
-  if (!payment || !open) return null;
+    const res = await markPaymentDelivered({ paymentId });
 
-  const {
-    id, code, type, itemId, amount, currency = 'JPY',
-    status, createdAt, reportedAt, senderName, userId
-  } = payment;
+    setBusy(false);
 
-  const created = createdAt?.toDate?.() || (createdAt ? new Date(createdAt) : null);
-  const reported = reportedAt?.toDate?.() || (reportedAt ? new Date(reportedAt) : null);
+    if (res?.ok) {
+      toast.success("COD marked as delivered.");
+      setOpen(false);
+      onHandled?.(paymentId, "delivered");
+    } else {
+      toast.error(res?.error || "Failed to update COD status.");
+    }
+  }, [paymentId, onHandled]);
+
+  // -------------------------------------------------------
+  // PREMIUM — Approve / Reject
+  // -------------------------------------------------------
+  const handleApprove = useCallback(async () => {
+    if (!window.confirm("Approve this deposit?")) return;
+    setBusy(true);
+
+    const res = await adminApproveDeposit({
+      paymentId,
+      reportId: reports[0]?.id || null,
+    });
+
+    setBusy(false);
+
+    if (res?.ok) {
+      toast.success("Deposit approved.");
+      setOpen(false);
+      onHandled?.(paymentId, "approved");
+    } else {
+      toast.error(res?.error || "Approval failed.");
+    }
+  }, [paymentId, reports, onHandled]);
+
+  const handleReject = useCallback(async () => {
+    if (!window.confirm("Reject this deposit?")) return;
+
+    setBusy(true);
+
+    const res = await adminRejectDeposit({
+      paymentId,
+      reportId: reports[0]?.id || null,
+      reason: note || "Unspecified",
+    });
+
+    setBusy(false);
+
+    if (res?.ok) {
+      toast.success("Deposit rejected.");
+      setOpen(false);
+      onHandled?.(paymentId, "rejected");
+    } else {
+      toast.error(res?.error || "Rejection failed.");
+    }
+  }, [paymentId, reports, note, onHandled]);
+
+  // -------------------------------------------------------
+  // VIEW — COD or DEPOSIT
+  // -------------------------------------------------------
+  if (!open) return null;
+
+  if (loading) {
+    return (
+      <div className="p-4 border rounded bg-white text-sm text-gray-600">
+        Loading payment…
+      </div>
+    );
+  }
+
+  if (!payment) {
+    return (
+      <div className="p-4 border rounded bg-white text-sm text-gray-600">
+        Payment not found.
+      </div>
+    );
+  }
+
+  const isCOD = payment.method === "cash_on_delivery";
+  const proof = reports?.[0]?.proofUrl || payment.receiptUrl;
 
   return (
     <div className="rounded-xl border shadow-sm bg-white p-4">
-      <div className="flex justify-between items-start">
+      {/* HEADER */}
+      <div className="flex justify-between items-start mb-3">
         <div>
-          <div className="text-sm text-gray-500">Payment ID</div>
-          <div className="font-mono text-sm">{id}</div>
+          <div className="text-xs text-gray-500">Payment ID</div>
+          <div className="font-mono text-sm">{paymentId}</div>
+
+          {ticketId && (
+            <>
+              <div className="text-xs text-gray-500 mt-2">Ticket ID</div>
+              <div className="font-mono text-xs text-gray-700">{ticketId}</div>
+            </>
+          )}
         </div>
+
         <button
-          className="text-gray-400 hover:text-gray-600"
           onClick={() => setOpen(false)}
-          aria-label="Close"
+          className="text-gray-400 hover:text-gray-600"
         >
           <X size={18} />
         </button>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-4 mt-3">
+      {/* INFO GRID */}
+      <div className="grid md:grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Row k="Status" v={status} />
-          <Row
-            k="Type"
-            v={type === 'subscription'
-              ? 'Subscription'
-              : type === 'premium_item'
-                ? `Premium Item${itemId ? ` (${itemId})` : ''}`
-                : String(type || '—')}
+          <Info label="Status" value={payment.status} />
+          <Info label="Method" value={payment.method} />
+          <Info
+            label="Amount"
+            value={`¥${payment.itemPriceJPY?.toLocaleString()}`}
           />
-          <Row k="Amount" v={typeof amount === 'number' ? `¥${amount.toLocaleString()} ${currency}` : '—'} />
-          <Row k="Code" v={code || '—'} mono />
-          <Row k="Reported" v={reported ? reported.toLocaleString() : '—'} />
-          <Row k="Created" v={created ? created.toLocaleString() : '—'} />
-          <Row k="Sender Name (user note)" v={senderName || payment.note || '—'} />
-          <div className="pt-2">
-            <div className="text-sm text-gray-500">User</div>
-            <div className="text-sm">
-              <div>{userMeta?.displayName || '—'}</div>
-              <div className="text-gray-600">{userMeta?.email || '—'}</div>
-              <div className="font-mono text-xs text-gray-500">{userId}</div>
-            </div>
-          </div>
-        </div>
+          <Info label="User" value={`${payment.userName} (${payment.userEmail})`} />
+          <Info
+            label="Created"
+            value={new Date(payment.createdAt).toLocaleString()}
+          />
 
-        <div>
-          <div className="text-sm text-gray-500 mb-2">Receipt</div>
-          {proofURLs.length === 0 ? (
-            <div className="text-sm text-gray-600">No receipt uploaded.</div>
-          ) : (
-            <div className="space-y-2">
-              {proofURLs.map(({ path, url }) => (
-                <div key={path} className="flex items-center justify-between rounded border p-2">
-                  <div className="truncate text-sm">
-                    <span className="font-mono text-gray-700">{path}</span>
-                  </div>
-                  {url ? (
-                    <a
-                      href={url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-indigo-600 hover:underline"
-                    >
-                      <ExternalLink size={16} />
-                      Open
-                    </a>
-                  ) : (
-                    <span className="text-xs text-gray-500">No URL</span>
-                  )}
-                </div>
-              ))}
+          {/* Delivery Info */}
+          {payment.deliveryInfo && (
+            <div className="text-sm mt-2">
+              <div className="text-gray-500 mb-1">Delivery Address</div>
+              <div>{payment.deliveryInfo.address}</div>
+              <div>{payment.deliveryInfo.zipCode}</div>
+              <div>{payment.deliveryInfo.phone}</div>
             </div>
           )}
+        </div>
 
-          <div className="mt-3">
-            <label className="text-sm text-gray-600">Admin note</label>
-            <textarea
-              rows={3}
-              className="w-full border rounded p-2 text-sm"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Optional note visible in payment record"
-            />
-          </div>
+        {/* RECEIPT / ITEM THUMBNAILS */}
+        <div>
+          {!isCOD && (
+            <>
+              <div className="text-sm text-gray-500 mb-1">Receipt</div>
+              {proof ? (
+                <a
+                  href={proof}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-indigo-600 hover:underline"
+                >
+                  <ExternalLink size={16} />
+                  Open proof
+                </a>
+              ) : (
+                <div className="text-sm text-gray-600">No receipt.</div>
+              )}
+
+              <div className="mt-3">
+                <label className="text-sm text-gray-600">Admin Note</label>
+                <textarea
+                  className="w-full border rounded p-2 text-sm"
+                  rows={3}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              </div>
+            </>
+          )}
+
+          {isCOD && (
+            <div className="text-sm text-gray-600 italic">
+              Cash on Delivery — no proof required.
+            </div>
+          )}
         </div>
       </div>
 
+      {/* ACTION BUTTONS */}
       <div className="flex justify-end gap-2 mt-4">
-        <button
-          className="inline-flex items-center gap-2 px-3 py-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-          onClick={() => setOpen(false)}
-        >
-          Close
-        </button>
-        <button
-          disabled={busy}
-          onClick={() => handleDecision('reject')}
-          className={`inline-flex items-center gap-2 px-3 py-2 rounded text-white ${busy ? 'bg-gray-400' : 'bg-rose-600 hover:bg-rose-700'}`}
-        >
-          <XCircle size={18} />
-          {busy ? 'Working…' : 'Reject'}
-        </button>
-        <button
-          disabled={busy}
-          onClick={() => handleDecision('approve')}
-          className={`inline-flex items-center gap-2 px-3 py-2 rounded text-white ${busy ? 'bg-gray-400' : 'bg-emerald-600 hover:bg-emerald-700'}`}
-        >
-          <CheckCircle2 size={18} />
-          {busy ? 'Working…' : 'Approve'}
-        </button>
+        {!isCOD && (
+          <>
+            <button
+              disabled={busy}
+              onClick={handleReject}
+              className="px-3 py-2 rounded text-white bg-rose-600 hover:bg-rose-700"
+            >
+              <XCircle size={18} />
+              Reject
+            </button>
+
+            <button
+              disabled={busy}
+              onClick={handleApprove}
+              className="px-3 py-2 rounded text-white bg-emerald-600 hover:bg-emerald-700"
+            >
+              <CheckCircle2 size={18} />
+              Approve
+            </button>
+          </>
+        )}
+
+        {isCOD && (
+          <button
+            disabled={busy}
+            onClick={handleCODDelivered}
+            className="px-3 py-2 rounded text-white bg-blue-600 hover:bg-blue-700"
+          >
+            <PackageCheck size={18} className="inline-block mr-1" />
+            Mark Delivered
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-function Row({ k, v, mono }) {
+function Info({ label, value }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="text-sm text-gray-500">{k}</div>
-      <div className={`text-sm ${mono ? 'font-mono' : 'font-medium'} text-gray-800`}>{v}</div>
+    <div className="flex justify-between text-sm">
+      <span className="text-gray-500">{label}</span>
+      <span className="font-medium text-gray-800">{value}</span>
     </div>
   );
 }

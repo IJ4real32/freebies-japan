@@ -1,4 +1,5 @@
-// ✅ FILE: src/components/MyActivity/DepositCard.js (FINAL PHASE-2)
+// ✅ FILE: src/components/MyActivity/DepositCard.js (PHASE-2 — FIXED DELETE LOGIC)
+
 import React from 'react';
 import { motion } from 'framer-motion';
 import { 
@@ -8,13 +9,13 @@ import {
 import StatusBadge from './StatusBadge';
 
 const DepositCard = ({ item, onDelete, deleting }) => {
-  
-  // Allow deletion ONLY for pending deposits
-  const canDelete = item.status === "pending";
+
+  // ✅ NEW RULE: Allow soft delete for ALL non-pending statuses
+  const canDelete = item.status !== "pending";
 
   const handleDelete = (e) => {
     e.stopPropagation();
-    if (!canDelete) return;
+    if (!canDelete || deleting) return;
     onDelete(item);
   };
 
@@ -60,7 +61,7 @@ const DepositCard = ({ item, onDelete, deleting }) => {
         {/* DELETE BUTTON */}
         <button
           onClick={handleDelete}
-          disabled={deleting || !canDelete}
+          disabled={!canDelete || deleting}
           className={`
             p-2 rounded-full transition-all duration-200
             ${canDelete
@@ -68,7 +69,11 @@ const DepositCard = ({ item, onDelete, deleting }) => {
               : "bg-gray-200 text-gray-400 cursor-not-allowed"}
             disabled:opacity-50 transform hover:scale-110 active:scale-95
           `}
-          title={canDelete ? "Delete Record" : "Cannot delete after processing"}
+          title={
+            canDelete
+              ? "Delete this deposit record"
+              : "Cannot delete pending deposits"
+          }
         >
           {deleting ? (
             <Loader2 size={16} className="animate-spin" />

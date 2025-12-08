@@ -1,16 +1,13 @@
 // ✅ FILE: src/components/MyActivity/ListingCard.jsx
 import React from "react";
 import { motion } from "framer-motion";
-import { Edit3, Trash2, RefreshCcw, Eye, Crown } from "lucide-react";
+import { Trash2, RefreshCcw, Eye, Crown } from "lucide-react";
 import StatusBadge from "./StatusBadge";
 
-/* -------------------------------------------------------
- * Normalize delivery status (Phase-2 standard)
- * ------------------------------------------------------*/
+/* Normalize delivery status */
 const normalize = (raw) => {
   if (!raw) return null;
   const key = raw.replace(/[-_]/g, "").toLowerCase();
-
   const map = {
     accepted: "accepted",
     pickupscheduled: "pickup_scheduled",
@@ -19,7 +16,6 @@ const normalize = (raw) => {
     delivered: "delivered",
     completed: "completed",
   };
-
   return map[key] || raw;
 };
 
@@ -27,7 +23,6 @@ const ListingCard = ({
   item,
   onView,
   onRelist,
-  onEdit,
   onDelete,
   loading,
 }) => {
@@ -42,16 +37,13 @@ const ListingCard = ({
   const premiumStatus = item?.premiumStatus;
   const deliveryStatus = normalize(item?.deliveryStatus);
 
-  /* ============================================================
-   * PHASE-2 RELIST LOGIC (synced with backend)
-   * ============================================================ */
-
-  // Free listing relistable when:
+  /* -------------------------------------------------------
+   * RELIST LOGIC (unchanged)
+   * ------------------------------------------------------*/
   const FREE_RELIST =
     !isPremium &&
     ["expired", "awarded", "requestClosed", "relisted"].includes(status);
 
-  // Premium listing relistable when:
   const PREMIUM_RELIST =
     isPremium &&
     ["cancelled", "buyerDeclined", "autoClosed", "available"].includes(
@@ -60,10 +52,9 @@ const ListingCard = ({
 
   const canRelist = FREE_RELIST || PREMIUM_RELIST;
 
-  /* ============================================================
-   * DELETE BLOCK — CANNOT DELETE WHEN IN DELIVERY PIPELINE
-   * ============================================================ */
-
+  /* -------------------------------------------------------
+   * DELETE RESTRICTIONS
+   * ------------------------------------------------------*/
   const BLOCK_DELETE = [
     "accepted",
     "pickup_scheduled",
@@ -75,20 +66,10 @@ const ListingCard = ({
 
   const canDelete = !BLOCK_DELETE.includes(deliveryStatus);
 
-  /* ============================================================
-   * SAFE ACTION HANDLERS (prevent bubbling)
-   * ============================================================ */
-
+  /* -------------------------------------------------------
+   * SAFE HANDLERS
+   * ------------------------------------------------------*/
   const stop = (e) => e.stopPropagation();
-
-  const handleEdit = (e) => {
-    stop(e);
-    if (isPremium) {
-      // Phase-2 rule: Premium editing not yet allowed
-      return;
-    }
-    onEdit(item);
-  };
 
   const handleDelete = (e) => {
     stop(e);
@@ -123,7 +104,6 @@ const ListingCard = ({
           onError={(e) => (e.target.src = "/images/default-item.jpg")}
         />
 
-        {/* STATUS BADGE */}
         <div className="absolute top-2 left-2">
           <StatusBadge
             status={status}
@@ -133,7 +113,6 @@ const ListingCard = ({
           />
         </div>
 
-        {/* PREMIUM BADGE */}
         {isPremium && (
           <div className="absolute top-2 right-2 bg-purple-600 text-white px-2 py-1 rounded-full text-xs flex items-center gap-1 shadow">
             <Crown size={12} />
@@ -147,7 +126,7 @@ const ListingCard = ({
         {item?.title || "Untitled Listing"}
       </h3>
 
-      {/* CATEGORY / PRICE */}
+      {/* Category or Premium Price */}
       {!isPremium ? (
         <p className="text-xs text-gray-500 mb-2 capitalize">
           {item?.category || "Uncategorized"}
@@ -158,7 +137,7 @@ const ListingCard = ({
         </p>
       )}
 
-      {/* BUTTONS */}
+      {/* ACTION BUTTONS */}
       <div className="flex items-center justify-between mt-3">
 
         {/* VIEW */}
@@ -181,14 +160,6 @@ const ListingCard = ({
               Relist
             </button>
           )}
-
-          {/* EDIT */}
-          <button
-            onClick={handleEdit}
-            className="flex items-center gap-1 bg-yellow-500 hover:bg-yellow-600 text-white text-xs px-3 py-1.5 rounded-full shadow"
-          >
-            <Edit3 size={12} /> Edit
-          </button>
 
           {/* DELETE */}
           <button

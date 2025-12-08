@@ -1,5 +1,5 @@
 // =====================================================
-//  PHASE 2 – Functions API Client (FINAL, CLEAN BUILD)
+//  PHASE 2 – Functions API Client (CLEAN BUILD – NO LEGACY)
 // =====================================================
 
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -148,11 +148,7 @@ export const cancelDonationForDonor = async ({ donationId, reason }) => {
 // ADMIN: FREE ITEM REQUEST MODERATION
 // =====================================================
 
-export const adminUpdateRequestStatus = async ({
-  requestId,
-  status,
-  note = "",
-}) => {
+export const adminUpdateRequestStatus = async ({ requestId, status, note = "" }) => {
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "onRequestStatusUpdate");
   const res = await callable({ requestId, status, note });
@@ -174,22 +170,33 @@ export const adminRelistDonation = async ({ donationId }) => {
 };
 
 // =====================================================
-// ADMIN: PAYMENT QUEUE / DEPOSITS
+// ADMIN: MONEY DONATIONS
 // =====================================================
 
-export const adminGetPaymentQueue = async (status, limit = 100) => {
+export const createMoneyDonation = async ({ amountJPY, message, proofUrl }) => {
   await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "adminGetPaymentQueue");
+  const callable = httpsCallable(functionsRegion, "createMoneyDonation");
+  const res = await callable({ amountJPY, message, proofUrl });
+  return res?.data || { ok: false };
+};
+
+export const adminGetMoneyDonationsQueue = async (status, limit = 100) => {
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "getMoneyDonationsQueue_Admin");
   const res = await callable({ status, limit });
   return res?.data || { ok: false };
 };
 
-export const getPaymentDetails = async ({ paymentId }) => {
-  await ensureFreshIdToken(true);
-  const callable = httpsCallable(functionsRegion, "adminGetPaymentDetails");
-  const res = await callable({ paymentId });
+export const adminVerifyMoneyDonation = async ({ donationId, verify, note }) => {
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "verifyMoneyDonation_Admin");
+  const res = await callable({ donationId, verify, note });
   return res?.data || { ok: false };
 };
+
+// =====================================================
+// PAYMENT HANDLING (DEPOSIT + COD)
+// =====================================================
 
 export const adminApproveDeposit = async ({ paymentId, reportId }) => {
   await ensureFreshIdToken();
@@ -205,47 +212,10 @@ export const adminRejectDeposit = async ({ paymentId, reportId, reason }) => {
   return res?.data || { ok: false };
 };
 
-// for delivery confirmation in the admin panel
 export const markPaymentDelivered = async ({ paymentId }) => {
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "markPaymentDelivered");
   const res = await callable({ paymentId });
-  return res?.data || { ok: false };
-};
-
-// =====================================================
-// ADMIN: MONEY DONATIONS
-// =====================================================
-
-export const createMoneyDonation = async ({
-  amountJPY,
-  message,
-  proofUrl,
-}) => {
-  await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "createMoneyDonation");
-  const res = await callable({ amountJPY, message, proofUrl });
-  return res?.data || { ok: false };
-};
-
-export const adminGetMoneyDonationsQueue = async (status, limit = 100) => {
-  await ensureFreshIdToken();
-  const callable = httpsCallable(
-    functionsRegion,
-    "getMoneyDonationsQueue_Admin"
-  );
-  const res = await callable({ status, limit });
-  return res?.data || { ok: false };
-};
-
-export const adminVerifyMoneyDonation = async ({
-  donationId,
-  verify,
-  note,
-}) => {
-  await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "verifyMoneyDonation_Admin");
-  const res = await callable({ donationId, verify, note });
   return res?.data || { ok: false };
 };
 

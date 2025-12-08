@@ -1,12 +1,12 @@
 // =============================================================
-// FILE: PurchaseCard.js (PHASE-2 — FINAL STABLE PATCH)
-// Premium Buyer Activity Card
+// FILE: PurchaseCard.js (PHASE-2 — FINAL STABLE PATCH v3)
+// Premium Buyer Activity Card — Uses donations.images ALWAYS
 // =============================================================
 
 import React from "react";
 import { Eye, Trash2 } from "lucide-react";
 
-// Premium delivery lock stages
+// Premium delivery lock stages (cannot delete)
 const DELIVERY_LOCK = [
   "depositPaid",
   "sellerAccepted",
@@ -15,6 +15,9 @@ const DELIVERY_LOCK = [
   "delivered",
   "sold",
 ];
+
+// Allowed delete statuses (your confirmed rules)
+const ALLOW_DELETE = ["cancelled", "completed", "rejected", "available"];
 
 export default function PurchaseCard({
   item,
@@ -26,19 +29,28 @@ export default function PurchaseCard({
   if (!item) return null;
 
   // ============================================================
-  // Safe values
+  // 🔥 ABSOLUTE FIX — USE donation.images AS THE ONLY SOURCE
   // ============================================================
-  const safeTitle = item.title || item.itemTitle || "Premium Item";
-  const safeImage =
-    item.images?.[0] || item.itemImages?.[0] || "/images/default-item.jpg";
+  const donation = item?.donation || {}; // Hydrated in MyActivity
 
-  const price = item.price || item.itemPriceJPY || null;
+  const images = donation.images || [];
+  const safeImage =
+    images.length > 0 ? images[0] : "/images/default-item.jpg";
+
+  const safeTitle =
+    donation.title || item.itemTitle || "Premium Item";
+
+  const price =
+    donation.price || item.itemPriceJPY || null;
+
   const premiumStatus = item.premiumStatus || "unknown";
 
   // ============================================================
-  // Prevent delete when item is in lifecycle
+  // FINAL DELETE LOGIC (Phase-2 Confirmed)
   // ============================================================
-  const canDelete = !DELIVERY_LOCK.includes(premiumStatus);
+  const canDelete =
+    !DELIVERY_LOCK.includes(premiumStatus) &&
+    ALLOW_DELETE.includes(premiumStatus);
 
   // ============================================================
   // Premium Status → Badge + Description
@@ -79,6 +91,21 @@ export default function PurchaseCard({
       color: "bg-gray-700 text-white",
       msg: "🎉 Transaction complete",
     },
+    cancelled: {
+      badge: "Cancelled",
+      color: "bg-red-600 text-white",
+      msg: "❌ Purchase was cancelled",
+    },
+    rejected: {
+      badge: "Rejected",
+      color: "bg-red-500 text-white",
+      msg: "⚠️ Payment was rejected",
+    },
+    completed: {
+      badge: "Completed",
+      color: "bg-green-700 text-white",
+      msg: "🎉 Order completed",
+    },
     unknown: {
       badge: "Processing",
       color: "bg-gray-500 text-white",
@@ -86,7 +113,8 @@ export default function PurchaseCard({
     },
   };
 
-  const status = PREMIUM_STATUS_MAP[premiumStatus] || PREMIUM_STATUS_MAP.unknown;
+  const status =
+    PREMIUM_STATUS_MAP[premiumStatus] || PREMIUM_STATUS_MAP.unknown;
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
@@ -100,14 +128,12 @@ export default function PurchaseCard({
             </h3>
 
             <div className="flex items-center gap-2">
-              {/* Premium Lifecycle Badge */}
               <span
                 className={`text-xs px-2 py-1 rounded-full font-medium ${status.color}`}
               >
                 {status.badge}
               </span>
 
-              {/* Premium Label */}
               <span className="text-xs px-2 py-1 rounded-full bg-indigo-600 text-white">
                 Premium
               </span>
@@ -119,6 +145,7 @@ export default function PurchaseCard({
             src={safeImage}
             alt={safeTitle}
             className="w-16 h-16 ml-2 rounded-lg object-cover shadow-sm"
+            onClick={() => onView(item)}
             onError={(e) => (e.target.src = "/images/default-item.jpg")}
           />
         </div>
@@ -143,7 +170,6 @@ export default function PurchaseCard({
         {/* ====================== ACTIONS ====================== */}
         <div className="flex justify-between items-center mt-4">
 
-          {/* View Details */}
           <button
             onClick={() => onView(item)}
             className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-sm font-medium"
@@ -152,23 +178,20 @@ export default function PurchaseCard({
             View Details
           </button>
 
-          {/* Delete */}
-          {onDelete && (
-            <button
-              onClick={() => onDelete(item)}
-              disabled={loading || !canDelete}
-              className={`p-1.5 rounded-full transition-colors ${
-                canDelete
-                  ? "hover:bg-red-50 hover:text-red-600 text-gray-500"
-                  : "opacity-40 cursor-not-allowed text-gray-400"
-              }`}
-              title={
-                canDelete ? "Delete record" : "Cannot delete during delivery"
-              }
-            >
-              <Trash2 size={16} />
-            </button>
-          )}
+          <button
+            onClick={() => onDelete(item)}
+            disabled={loading || !canDelete}
+            className={`p-1.5 rounded-full transition-colors ${
+              canDelete
+                ? "hover:bg-red-50 hover:text-red-600 text-gray-500"
+                : "opacity-40 cursor-not-allowed text-gray-400"
+            }`}
+            title={
+              canDelete ? "Delete record" : "Cannot delete during delivery"
+            }
+          >
+            <Trash2 size={16} />
+          </button>
         </div>
       </div>
     </div>

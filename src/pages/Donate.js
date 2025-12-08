@@ -44,14 +44,6 @@ const SIZE_FEES = {
   oversized: { min: 2000, max: 3000 },
 };
 
-// ✅ Request windows for free donations
-const REQUEST_WINDOWS = [
-  { label: "24 hours", hours: 24 },
-  { label: "48 hours", hours: 48 },
-  { label: "72 hours", hours: 72 },
-  { label: "7 days", hours: 168 },
-];
-
 /* -------------------- Component -------------------- */
 export default function Donate() {
   const { currentUser } = useAuth();
@@ -63,7 +55,6 @@ export default function Donate() {
 
   const [loadingZipcode, setLoadingZipcode] = useState(false);
   const [addressOpen, setAddressOpen] = useState(false);
-  const [redirectPending, setRedirectPending] = useState(false);
 
   const [form, setForm] = useState({
     title: "",
@@ -73,7 +64,7 @@ export default function Donate() {
     type: "free",
     price: "",
     size: "",
-    windowHours: 48,
+    windowHours: 48, // 🔒 Always fixed
     addressLine1: "",
     addressLine2: "",
     city: "",
@@ -105,55 +96,56 @@ export default function Donate() {
           }));
           setAddressOpen(true);
         }
-      } catch (e) {
-        console.warn("Could not fetch saved address:", e);
-      }
+      } catch {}
     })();
   }, [currentUser]);
 
-  /* -------------------- 🆕 Relist Prefill Logic -------------------- */
+  /* -------------------- Relist Prefill -------------------- */
   useEffect(() => {
     if (!relistId || !currentUser) return;
     (async () => {
       try {
         const oldDoc = await getDoc(doc(db, "donations", relistId));
-        if (oldDoc.exists()) {
-          const d = oldDoc.data();
-          if (d.donorId !== currentUser.uid) {
-            toast.error("You can only relist your own items.");
-            return;
-          }
-          setForm((f) => ({
-            ...f,
-            title: d.title || "",
-            description: d.description || "",
-            category: d.category || "",
-            condition: d.condition || "good",
-            type: d.type || "free",
-            price: d.price || "",
-            size: d.size || "",
-            addressLine1: d.pickupAddress?.addressLine1 || "",
-            addressLine2: d.pickupAddress?.addressLine2 || "",
-            city: d.pickupAddress?.city || "",
-            postalCode: d.pickupAddress?.postalCode || "",
-            prefecture: d.pickupAddress?.prefecture || "",
-          }));
-          if (d.images?.length) {
-            const fetchedImages = await Promise.all(
-              d.images.map(async (url) => {
-                const res = await fetch(url);
-                const blob = await res.blob();
-                return new File([blob], "relist.jpg", { type: blob.type });
-              })
-            );
-            setImages(fetchedImages.slice(0, 4));
-          }
-          toast.success("♻️ Prefilled from your previous donation!");
-        } else {
-          toast.error("Original item not found or removed.");
+        if (!oldDoc.exists()) {
+          toast.error("Original item not found.");
+          return;
         }
+        const d = oldDoc.data();
+        if (d.donorId !== currentUser.uid) {
+          toast.error("You can only relist your own items.");
+          return;
+        }
+
+        setForm((f) => ({
+          ...f,
+          title: d.title || "",
+          description: d.description || "",
+          category: d.category || "",
+          condition: d.condition || "good",
+          type: d.type || "free",
+          price: d.price || "",
+          size: d.size || "",
+          addressLine1: d.pickupAddress?.addressLine1 || "",
+          addressLine2: d.pickupAddress?.addressLine2 || "",
+          city: d.pickupAddress?.city || "",
+          postalCode: d.pickupAddress?.postalCode || "",
+          prefecture: d.pickupAddress?.prefecture || "",
+        }));
+
+        // Preload images
+        if (d.images?.length) {
+          const fetched = await Promise.all(
+            d.images.map(async (url) => {
+              const res = await fetch(url);
+              const blob = await res.blob();
+              return new File([blob], "relist.jpg", { type: blob.type });
+            })
+          );
+          setImages(fetched.slice(0, 4));
+        }
+
+        toast.success("♻️ Prefilled from previous donation.");
       } catch (err) {
-        console.error(err);
         toast.error("Failed to load relist data.");
       }
     })();
@@ -163,9 +155,13 @@ export default function Donate() {
   const fetchAddressFromZipcode = async (zip) => {
     const clean = zip.replace(/-/g, "");
     if (clean.length !== 7) return;
+
     setLoadingZipcode(true);
+
     try {
-      const res = await fetch(`https://zipcloud.ibsnet.co.jp/api/search?zipcode=${clean}`);
+      const res = await fetch(
+        `https://zipcloud.ibsnet.co.jp/api/search?zipcode=${clean}`
+      );
       const data = await res.json();
       if (data.status === 200 && data.results?.length) {
         const r = data.results[0];
@@ -174,16 +170,16 @@ export default function Donate() {
           prefecture: r.address1,
           city: `${r.address2}${r.address3}`,
         }));
-        toast.success("Address auto-filled from zipcode!");
-      } else toast.error("Zipcode not found");
+        toast.success("Address auto-filled!");
+      } else toast.error("Zipcode not found.");
     } catch {
-      toast.error("Failed to fetch address");
-    } finally {
-      setLoadingZipcode(false);
+      toast.error("Failed to fetch address.");
     }
+
+    setLoadingZipcode(false);
   };
 
-  /* -------------------- Input Handlers -------------------- */
+  /* -------------------- Input Handling -------------------- */
   const sanitizeText = (v = "") =>
     v
       .replace(/[^a-zA-Z0-9\s.,!()&'\":;/-]/g, "")
@@ -192,35 +188,29 @@ export default function Donate() {
 
   const onChange = (e) => {
     const { name, value, type } = e.target;
-    if (type === "select-one" || type === "radio") {
+
+    if (type === "radio" || type === "select-one") {
       setForm((f) => ({ ...f, [name]: value }));
       return;
     }
+
     let newVal = value;
+
     if (name === "price") newVal = value.replace(/[^\d]/g, "");
     else if (name === "postalCode") {
-      newVal = value.replace(/[^\d]/g, "").replace(/(\d{3})(\d{4})/, "$1-$2").slice(0, 8);
+      newVal = value.replace(/[^\d]/g, "").replace(/(\d{3})(\d{4})/, "$1-$2");
       if (newVal.length === 8) fetchAddressFromZipcode(newVal);
     } else newVal = sanitizeText(value);
+
     setForm((f) => ({ ...f, [name]: newVal }));
   };
 
   const onFiles = (e) => {
     const files = Array.from(e.target.files || []);
-    const valid = files.filter((f) => f.type.startsWith("image/") && f.size <= 5 * 1024 * 1024);
+    const valid = files.filter(
+      (f) => f.type.startsWith("image/") && f.size <= 5 * 1024 * 1024
+    );
     setImages([...images, ...valid].slice(0, 4));
-  };
-
-  const uploadAll = async (id) => {
-    const urls = [];
-    for (const f of images) {
-      const ext = (f.name.split(".").pop() || "jpg").toLowerCase();
-      const path = `donations/${id}/${Date.now()}-${uuidv4()}.${ext}`;
-      const rf = ref(storage, path);
-      await uploadBytes(rf, f, { contentType: f.type });
-      urls.push(await getDownloadURL(rf));
-    }
-    return urls;
   };
 
   /* -------------------- Validation -------------------- */
@@ -236,21 +226,38 @@ export default function Donate() {
       !form.prefecture.trim()
     )
       return false;
+
     if (images.length < 2 || images.length > 4) return false;
+
     if (isPremium) {
       const n = Number(form.price);
       if (!Number.isFinite(n) || n < 100) return false;
     }
+
     return true;
   }, [form, images, isPremium]);
 
-  /* -------------------- Submit -------------------- */
+  /* -------------------- Upload Images -------------------- */
+  const uploadAll = async (id) => {
+    const urls = [];
+    for (const f of images) {
+      const ext = f.name.split(".").pop() || "jpg";
+      const path = `donations/${id}/${Date.now()}-${uuidv4()}.${ext}`;
+      const rf = ref(storage, path);
+      await uploadBytes(rf, f, { contentType: f.type });
+      urls.push(await getDownloadURL(rf));
+    }
+    return urls;
+  };
+
+  /* -------------------- Submit Donation -------------------- */
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting || !currentUser) return;
     if (!canSubmit) return setErrorMsg("Please complete all required fields.");
 
     setSubmitting(true);
+
     try {
       const id = uuidv4();
       const urls = await uploadAll(id);
@@ -287,32 +294,39 @@ export default function Donate() {
         images: urls,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
+
+        // 🔒 AUTO 48-HOUR REQUEST WINDOW
         ...(form.type === "free"
           ? {
-              requestWindowHours: Number(form.windowHours),
+              requestWindowHours: 48,
               requestWindowEnd: Timestamp.fromDate(
-                new Date(Date.now() + Number(form.windowHours) * 60 * 60 * 1000)
+                new Date(Date.now() + 48 * 60 * 60 * 1000)
               ),
             }
           : {}),
+
         ...(relistId ? { relistedFrom: relistId } : {}),
       };
 
       await addDoc(collection(db, "donations"), donation);
-      toast.success(relistId ? "♻️ Item relisted successfully!" : "🎉 Donation submitted successfully!");
+
+      toast.success(
+        relistId ? "♻️ Item relisted!" : "🎉 Donation submitted successfully!"
+      );
+
       setSuccessMsg(
         relistId
-          ? "✅ Relisted! Redirecting to My Activity…"
-          : "✅ Donation submitted! Redirecting to My Activity…"
+          ? "♻️ Relisted! Redirecting..."
+          : "🎉 Submitted! Redirecting..."
       );
+
       setTimeout(() => navigate("/myactivity", { replace: true }), 1200);
     } catch (err) {
-      console.error(err);
       setErrorMsg(err.message || "Donation failed");
       toast.error("❌ Failed to submit donation.");
-    } finally {
-      setSubmitting(false);
     }
+
+    setSubmitting(false);
   };
 
   /* -------------------- UI -------------------- */
@@ -381,10 +395,10 @@ export default function Donate() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
                 >
                   <option value="">Select size</option>
-                  <option value="small">Small (e.g., books, shoes)</option>
-                  <option value="medium">Medium (e.g., microwave, fan)</option>
-                  <option value="large">Large (e.g., chair, TV)</option>
-                  <option value="oversized">Oversized (e.g., sofa, fridge)</option>
+                  <option value="small">Small (books, shoes)</option>
+                  <option value="medium">Medium (microwave, fan)</option>
+                  <option value="large">Large (chair, TV)</option>
+                  <option value="oversized">Oversized (sofa, fridge)</option>
                 </select>
               </div>
 
@@ -408,7 +422,9 @@ export default function Donate() {
                       />
                       <button
                         type="button"
-                        onClick={() => setImages(images.filter((_, i) => i !== idx))}
+                        onClick={() =>
+                          setImages(images.filter((_, i) => i !== idx))
+                        }
                         className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition"
                       >
                         ×
@@ -439,7 +455,7 @@ export default function Donate() {
                 </select>
               </div>
 
-              {/* Address */}
+              {/* Address Section */}
               <div className="border-t pt-3" ref={addressRef}>
                 <button
                   type="button"
@@ -449,7 +465,7 @@ export default function Donate() {
                   <span>📍 Pickup Address *</span>
                   <ChevronDown
                     size={18}
-                    className={`transform transition-transform duration-300 ${
+                    className={`transform transition-transform ${
                       addressOpen ? "rotate-180" : ""
                     }`}
                   />
@@ -457,14 +473,18 @@ export default function Donate() {
 
                 <div
                   className={`transition-all duration-300 overflow-hidden ${
-                    addressOpen ? "max-h-[900px] mt-3 opacity-100" : "max-h-0 opacity-0"
+                    addressOpen
+                      ? "max-h-[900px] mt-3 opacity-100"
+                      : "max-h-0 opacity-0"
                   } md:max-h-none md:opacity-100 md:mt-3`}
                 >
                   <div className="mb-3">
                     <label className="block text-sm font-medium mb-1">
-                      Postal Code *{" "}
+                      Postal Code *
                       {loadingZipcode && (
-                        <span className="ml-2 text-xs text-indigo-600">Loading...</span>
+                        <span className="ml-2 text-xs text-indigo-600">
+                          Loading...
+                        </span>
                       )}
                     </label>
                     <input
@@ -474,24 +494,24 @@ export default function Donate() {
                       required
                       placeholder="e.g., 150-0001"
                       maxLength={8}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     />
                   </div>
 
                   <div className="mb-3">
-                    <label className="block text-sm font-medium mb-1">Prefecture *</label>
+                    <label className="block text-sm font-medium mb-1">
+                      Prefecture *
+                    </label>
                     <select
                       name="prefecture"
                       value={form.prefecture}
                       onChange={onChange}
                       required
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     >
                       <option value="">Select Prefecture</option>
                       {PREFECTURES.map((p) => (
-                        <option key={p} value={p}>
-                          {p}
-                        </option>
+                        <option key={p}>{p}</option>
                       ))}
                     </select>
                   </div>
@@ -504,19 +524,21 @@ export default function Donate() {
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3"
                     required
                   />
+
                   <input
                     name="addressLine1"
                     value={form.addressLine1}
                     onChange={onChange}
-                    placeholder="Street address (e.g., 1-2-3 Shibuya)"
+                    placeholder="Street address (1-2-3...)"
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3"
                     required
                   />
+
                   <input
                     name="addressLine2"
                     value={form.addressLine2}
                     onChange={onChange}
-                    placeholder="Building/Apartment (optional)"
+                    placeholder="Building/Apt (optional)"
                     className="w-full border border-gray-300 rounded-lg px-3 py-2"
                   />
                 </div>
@@ -533,10 +555,11 @@ export default function Donate() {
                       value="free"
                       checked={form.type === "free"}
                       onChange={onChange}
-                      className="accent-indigo-600 w-2 h-1"
+                      className="accent-indigo-600"
                     />
                     Free (donation)
                   </label>
+
                   <label className="flex items-center gap-2 text-sm">
                     <input
                       type="radio"
@@ -544,14 +567,14 @@ export default function Donate() {
                       value="premium"
                       checked={form.type === "premium"}
                       onChange={onChange}
-                      className="accent-indigo-600 w-2 h-1"
+                      className="accent-indigo-600"
                     />
                     Premium (for sale)
                   </label>
                 </div>
               </div>
 
-              {/* Price (only for premium) */}
+              {/* Price */}
               {isPremium && (
                 <div>
                   <label className="block font-medium mb-1">Price (JPY) *</label>
@@ -568,29 +591,11 @@ export default function Donate() {
                 </div>
               )}
 
-              {/* ✅ Request Window for Free Donations */}
+              {/* 🆕 FIXED REQUEST WINDOW — USER CANNOT EDIT */}
               {form.type === "free" && (
-                <div>
-                  <label className="block font-medium mb-1">
-                    Request Window Duration *
-                  </label>
-                  <select
-                    name="windowHours"
-                    value={form.windowHours}
-                    onChange={onChange}
-                    required
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  >
-                    {REQUEST_WINDOWS.map((w) => (
-                      <option key={w.hours} value={w.hours}>
-                        {w.label}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Determines how long users can request this free item before
-                    it’s automatically processed for approval.
-                  </p>
+                <div className="bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-lg p-3 text-sm">
+                  ⏳ This free item will accept requests for <b>48 hours</b>.
+                  After that, the system automatically selects a recipient.
                 </div>
               )}
             </div>
@@ -601,9 +606,13 @@ export default function Donate() {
             <button
               type="submit"
               disabled={submitting || !canSubmit}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-6 py-2 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 transition-colors duration-200"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-6 py-2 rounded-full disabled:opacity-50"
             >
-              {submitting ? "Uploading..." : relistId ? "Relist Item" : "Donate Now"}
+              {submitting
+                ? "Uploading..."
+                : relistId
+                ? "Relist Item"
+                : "Donate Now"}
             </button>
           </div>
         </form>
