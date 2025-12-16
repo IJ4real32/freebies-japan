@@ -1,4 +1,4 @@
-// ✅ FILE: src/pages/AdminPaymentDetails.js (PHASE-2 FINAL — FIRESTORE ONLY — UI FIXED)
+// ✅ FILE: src/pages/AdminPaymentDetails.js (PHASE-2 FINAL — FIRESTORE ONLY — PRICE FIXED & UI CLEAN)
 
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
@@ -80,7 +80,7 @@ export default function AdminPaymentDetails() {
   }, [reports]);
 
   /* ----------------------------------------------------
-     Extract Delivery Information
+     Extract Delivery Info
   ---------------------------------------------------- */
   const extractDeliveryInfo = (p, firstReport) => {
     if (!p) return null;
@@ -102,7 +102,7 @@ export default function AdminPaymentDetails() {
   };
 
   /* ----------------------------------------------------
-     Load payment + reports from Firestore
+     Load payment + reports
   ---------------------------------------------------- */
   const fetchDetails = useCallback(async () => {
     try {
@@ -115,10 +115,9 @@ export default function AdminPaymentDetails() {
       setPayment(paymentData);
 
       const rSnap = await getDocs(collection(db, "payments", paymentId, "reports"));
-
       const rList = rSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-      // Newest report first
+      // newest first
       rList.sort((a, b) => {
         const A = a.createdAt?.seconds ?? 0;
         const B = b.createdAt?.seconds ?? 0;
@@ -134,9 +133,6 @@ export default function AdminPaymentDetails() {
     }
   }, [paymentId]);
 
-  /* ----------------------------------------------------
-     Auth + Initial Load
-  ---------------------------------------------------- */
   useEffect(() => {
     (async () => {
       const ok = await checkAdminStatus();
@@ -150,7 +146,6 @@ export default function AdminPaymentDetails() {
   ---------------------------------------------------- */
   const approve = async () => {
     const reportId = latestReport?.id;
-
     try {
       setActionLoading(true);
       await adminApproveDeposit({ paymentId, reportId });
@@ -180,7 +175,7 @@ export default function AdminPaymentDetails() {
   };
 
   const markDelivered = async () => {
-    if (!window.confirm("Mark this COD as delivered?")) return;
+    if (!window.confirm("Mark this COD payment as delivered?")) return;
 
     try {
       setActionLoading(true);
@@ -195,23 +190,21 @@ export default function AdminPaymentDetails() {
   };
 
   /* ----------------------------------------------------
-     UI
+     UI LOADING / ERROR
   ---------------------------------------------------- */
   if (loading)
-    return (
-      <div className="p-10 text-center text-gray-700 text-lg">
-        Loading payment…
-      </div>
-    );
+    return <div className="p-10 text-center text-gray-700 text-lg">Loading payment…</div>;
 
   if (error || !payment)
-    return (
-      <div className="p-10 text-center text-red-600 text-lg">
-        {error || "Payment not found"}
-      </div>
-    );
+    return <div className="p-10 text-center text-red-600 text-lg">{error || "Payment not found"}</div>;
 
   const delivery = extractDeliveryInfo(payment, latestReport);
+
+  // ⭐ FIXED AMOUNT LOGIC ⭐
+  const effectiveAmount =
+    payment.amount && payment.amount > 0
+      ? payment.amount
+      : payment.itemPriceJPY || 0;
 
   /* ----------------------------------------------------
      RENDER
@@ -226,33 +219,29 @@ export default function AdminPaymentDetails() {
             <Home size={14} /> Dashboard
           </Link>
           <ChevronRight size={14} className="mx-1" />
-          <Link to="/admin/payments" className="hover:text-indigo-600">
-            Payments
-          </Link>
+          <Link to="/admin/payments" className="hover:text-indigo-600">Payments</Link>
           <ChevronRight size={14} className="mx-1" />
-          <span className="font-medium text-gray-900">
-            Details / {paymentId.slice(0, 10)}…
-          </span>
+          <span className="font-medium text-gray-900">Details / {paymentId.slice(0, 10)}…</span>
         </div>
 
         {/* Payment Summary */}
         <h2 className="text-2xl font-bold text-gray-900 mb-4">Payment Summary</h2>
 
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-gray-50 p-5 rounded-lg border text-gray-800">
-          <div><b className="text-gray-700">ID:</b> {payment.id}</div>
-          <div><b className="text-gray-700">User:</b> {payment.userName || "Unknown"}</div>
-          <div><b className="text-gray-700">Email:</b> {payment.userEmail || "—"}</div>
-          <div><b className="text-gray-700">Amount:</b> {formatAmount(payment.amount ?? payment.amountJPY)}</div>
-          <div><b className="text-gray-700">Method:</b> {payment.method}</div>
+          <div><b>ID:</b> {payment.id}</div>
+          <div><b>User:</b> {payment.userName || "Unknown"}</div>
+          <div><b>Email:</b> {payment.userEmail || "—"}</div>
+          <div><b>Amount:</b> {formatAmount(effectiveAmount)}</div>
+          <div><b>Method:</b> {payment.method}</div>
           <div>
-            <b className="text-gray-700">Status:</b>{" "}
+            <b>Status:</b>{" "}
             <span className={`px-2 py-1 rounded-full ${statusBadge(payment.status)}`}>
               {payment.status}
             </span>
           </div>
         </div>
 
-        {/* Reports Section */}
+        {/* Reports */}
         <h2 className="text-2xl font-bold text-gray-900 mt-10 mb-4">Deposit Reports</h2>
 
         <div className="bg-gray-50 border rounded-xl p-6 shadow-sm text-gray-800">
@@ -262,16 +251,13 @@ export default function AdminPaymentDetails() {
             <div className="space-y-4">
               {reports.map((r) => (
                 <div key={r.id} className="p-4 bg-white border rounded shadow-sm">
-                  <div><b className="text-gray-700">Date:</b> {formatDate(r.createdAt)}</div>
-                  <div><b className="text-gray-700">Status:</b> {r.status || "—"}</div>
+                  <div><b>Date:</b> {formatDate(r.createdAt)}</div>
+                  <div><b>Status:</b> {r.status || "—"}</div>
 
                   <div className="mt-3">
                     {r.proofUrl ? (
                       <a href={r.proofUrl} target="_blank" rel="noopener noreferrer">
-                        <img
-                          src={r.proofUrl}
-                          className="w-40 h-40 object-cover border rounded shadow"
-                        />
+                        <img src={r.proofUrl} className="w-40 h-40 object-cover border rounded shadow" />
                       </a>
                     ) : (
                       <span className="text-gray-600">No image</span>
@@ -289,21 +275,17 @@ export default function AdminPaymentDetails() {
             <h2 className="text-2xl font-bold text-gray-900 mt-10 mb-4">Delivery Information</h2>
 
             <div className="bg-gray-50 p-6 border rounded-xl shadow-sm text-gray-800">
-              <p><b className="text-gray-700">Address:</b> {delivery.address}</p>
-              <p><b className="text-gray-700">Phone:</b> {delivery.phone}</p>
-              {delivery.zip && (
-                <p><b className="text-gray-700">Zip Code:</b> {delivery.zip}</p>
-              )}
-              {delivery.room && (
-                <p><b className="text-gray-700">Room:</b> {delivery.room}</p>
-              )}
+              <p><b>Address:</b> {delivery.address}</p>
+              <p><b>Phone:</b> {delivery.phone}</p>
+              {delivery.zip && <p><b>Zip Code:</b> {delivery.zip}</p>}
+              {delivery.room && <p><b>Room:</b> {delivery.room}</p>}
             </div>
           </>
         )}
 
-        {/* Actions */}
+        {/* Action Buttons */}
         <div className="mt-10 flex gap-4">
-          {/* Deposit approvals */}
+          {/* Deposit actions */}
           {payment.method !== "cash_on_delivery" && (
             <>
               <button
@@ -324,7 +306,7 @@ export default function AdminPaymentDetails() {
             </>
           )}
 
-          {/* COD delivered */}
+          {/* COD */}
           {payment.method === "cash_on_delivery" && (
             <button
               disabled={actionLoading}

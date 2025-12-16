@@ -1,5 +1,8 @@
-// ✅ FILE: src/pages/Items.js (FULLY CORRECTED PER 15-POINT LIST)
-import React, { useEffect, useState, useCallback, useRef } from "react";
+// =======================================================
+// ITEMS PAGE — CLEANED UP WITH PROPER COUNTERS
+// =======================================================
+
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection,
@@ -13,7 +16,7 @@ import {
   doc
 } from "firebase/firestore";
 import { db } from "../firebase";
-import { 
+import {
   onRequestCreateAddTicket,
   decrementTrialCredit,
   updatePremiumStatus
@@ -24,424 +27,448 @@ import SubscriptionModal from "../components/Payments/SubscriptionModal";
 import ItemDepositButton from "../components/Payments/ItemDepositButton";
 import PremiumSellerActions from "../components/Premium/PremiumSellerActions";
 import PremiumBuyerActions from "../components/Premium/PremiumBuyerActions";
-import { 
-  X, ArrowLeft, ChevronLeft, ChevronRight, Search, 
+import PremiumTimeline from "../components/MyActivity/PremiumTimeline";
+import {
+  X, ArrowLeft, ChevronLeft, ChevronRight, Search,
   Crown, Package, Truck, CheckCircle, CreditCard,
-  User, Clock, Ban, AlertCircle
+  User, Clock, Ban, AlertCircle, Calendar,
+  CircleDollarSign, Flag, ShieldCheck, ClipboardCheck
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { throttle } from "lodash";
 
 const PAGE_SIZE = 12;
 
-/* Helper: format countdown */
-function formatTimeRemaining(endAt) {
-  if (!endAt) return "";
-  
-  let end;
-  if (endAt.toMillis) {
-    end = endAt.toMillis();
-  } else if (endAt.seconds) {
-    end = endAt.seconds * 1000;
-  } else if (typeof endAt === 'number') {
-    end = endAt;
-  } else {
-    end = new Date(endAt).getTime();
-  }
-  
-  const diff = Math.max(0, end - Date.now());
-  if (diff <= 0) return "Expired";
-  const hrs = Math.floor(diff / 1000 / 3600);
-  const mins = Math.floor((diff / 1000 / 60) % 60);
-  return hrs > 0 ? `${hrs}h ${mins}m left` : `${mins}m left`;
-}
+// =======================================================
+// DELIVERABLE A: FREE-ITEM SYSTEM UPGRADE
+// =======================================================
 
-/* ✅ FIX 12: Enhanced validation for backwards compatibility */
-const isValidItem = (item) => {
-  if (!item || !item.id) return false;
+/* ✅ A: Safe timestamp parser */
+const parseTS = (ts) => {
+  if (!ts) return null;
   
-  // Handle legacy items without title
-  if (!item.title || item.title.trim() === "") {
-    item.title = "Untitled Item";
+  if (ts?.toMillis) return ts.toMillis();
+  if (ts?.seconds) return ts.seconds * 1000;
+  
+  const n = Number(ts);
+  if (!isNaN(n)) return n;
+  
+  try {
+    return new Date(ts).getTime();
+  } catch {
+    return null;
   }
-  
-  // ✅ FIX 12: Handle legacy items without images
-  if (!item.images || !Array.isArray(item.images) || item.images.length === 0) {
-    // Legacy free items might have itemImage instead of images array
-    if (item.itemImage) {
-      item.images = [item.itemImage];
-    } else if (item.imageUrl) {
-      item.images = [item.imageUrl];
-    } else {
-      item.images = ["/images/default-item.jpg"];
-    }
-  }
-  
-  // ✅ FIX 12: Handle premium items missing price
-  if (item.type === "premium" && !item.price && !item.priceJPY) {
-    item.price = 0; // Default price
-  }
-  
-  // ✅ FIX 12: Handle premium items missing status
-  if (item.type === "premium" && !item.premiumStatus) {
-    item.premiumStatus = "available"; // Default status
-  }
-  
-  // ✅ FIX 12: Handle missing type (legacy items)
-  if (!item.type) {
-    item.type = item.price || item.priceJPY ? "premium" : "free";
-  }
-  
-  return true;
 };
 
-/* ✅ FIX 5: Check if free item is requestable */
-const isFreeRequestable = (item) => {
-  return ["active", "sponsored", "relisted"].includes(item.status);
-};
-
-/* ✅ FIX 14: Enhanced free item closed check */
+/* ✅ A: Enhanced free item closed check with 24h fallback */
 const isFreeItemClosed = (item) => {
+  if (!item) return true;
+  
   if (item.status === "closed") return true;
   
-  if (!item.requestWindowEnd) {
-    // Legacy items might not have requestWindowEnd
-    if (item.createdAt) {
-      // Default 24-hour window for legacy items
-      let createdAt;
-      if (item.createdAt.toMillis) {
-        createdAt = item.createdAt.toMillis();
-      } else if (item.createdAt.seconds) {
-        createdAt = item.createdAt.seconds * 1000;
-      } else {
-        createdAt = new Date(item.createdAt).getTime();
-      }
-      return (Date.now() - createdAt) > (24 * 60 * 60 * 1000);
-    }
-    return false;
-  }
+  const end = parseTS(item.requestWindowEnd);
   
-  let end;
-  if (item.requestWindowEnd.toMillis) {
-    end = item.requestWindowEnd.toMillis();
-  } else if (item.requestWindowEnd.seconds) {
-    end = item.requestWindowEnd.seconds * 1000;
-  } else {
-    end = new Date(item.requestWindowEnd).getTime();
+  // ✅ A: Fallback to 24h from creation if requestWindowEnd missing
+  if (!end) {
+    const created = parseTS(item.createdAt);
+    if (!created) return true;
+    
+    return Date.now() - created > 24 * 60 * 60 * 1000;
   }
   
   return end <= Date.now();
 };
 
-/* ✅ FIX 1: Filter items to show ONLY visible items */
+/* ✅ A: Free item requestability check */
+const isFreeRequestable = (item) => {
+  if (!item) return false;
+  return ["active", "sponsored", "relisted"].includes(item.status);
+};
+
+/* ✅ A & F: Universal sanitizer */
+const sanitizeItem = (item) => {
+  if (!item?.id) return null;
+  
+  // ✅ F: Title fallback
+  if (!item.title || !item.title.trim()) {
+    item.title = "Untitled Item";
+  }
+  
+  // ✅ F: Image fallback
+  if (!Array.isArray(item.images) || item.images.length === 0) {
+    item.images = [
+      item.itemImage || 
+      item.imageUrl || 
+      "/images/default-item.jpg"
+    ];
+  }
+  
+  // ✅ F: Detect premium/free
+  if (!item.type) {
+    item.type = item.price || item.priceJPY ? "premium" : "free";
+  }
+  
+  // ✅ F: Price correction
+  if (item.type === "premium") {
+    item.price = item.price || item.priceJPY || 0;
+  }
+  
+  // ✅ F: Premium status correction
+  if (item.type === "premium" && !item.premiumStatus) {
+    item.premiumStatus = "available";
+  }
+  
+  // ✅ F: Handle ownerId/donorId
+  if (!item.ownerId && item.donorId) {
+    item.ownerId = item.donorId;
+  }
+  
+  return item;
+};
+
+// =======================================================
+// DELIVERABLE B: PREMIUM ITEM VISIBILITY + LIFECYCLE
+// =======================================================
+
+/* ✅ B: Visible premium statuses */
+const visiblePremiumStatuses = [
+  "available",
+  "depositPaid",
+  "preparingDelivery",
+  "sellerScheduledPickup",
+  "inTransit",
+  "delivered",
+  "completionCheck",
+  "sold",
+  "buyerDeclined",
+  "buyerDeclinedAtDoor",
+  "cancelled",
+  "autoClosed"
+];
+
+/* ✅ B & F: Final visibility filter */
 const filterVisibleItems = (items) => {
-  return items.filter(item => {
+  return items.filter((item) => {
     if (!item) return false;
     
-    // ✅ FIX 12: Ensure item has basic structure
-    if (!isValidItem(item)) return false;
+    const sanitized = sanitizeItem({ ...item });
+    if (!sanitized) return false;
     
-    // FREE ITEMS
-    if (item.type !== "premium") {
-      const freeVisibleStatuses = ["active", "sponsored", "relisted"];
-      return freeVisibleStatuses.includes(item.status);
+    if (sanitized.type !== "premium") {
+      return ["active", "sponsored", "relisted"].includes(sanitized.status);
     }
-
-    // PREMIUM ITEMS (✅ FIX 1: Phase 2 visibility rules)
-    const visiblePremiumStatuses = [
-      "available",
-      "depositPaid", 
-      "preparingDelivery",
-      "inTransit",
-      "delivered",
-      "sold",
-      "buyerDeclined",
-      "cancelled",
-      "autoClosed"
-    ];
-    return visiblePremiumStatuses.includes(item.premiumStatus);
+    
+    return visiblePremiumStatuses.includes(sanitized.premiumStatus);
   });
 };
 
-/* ✅ FIX 8 & 13: Enhanced Premium Status Configuration */
+// =======================================================
+// DELIVERABLE B & D: PREMIUM STATUS CONFIGURATION
+// =======================================================
+
 const premiumStatusConfig = {
   available: {
     label: "Available",
     color: "bg-emerald-100 text-emerald-800",
     badgeColor: "bg-emerald-600 text-white",
     ribbonColor: "from-emerald-500 to-green-500",
-    timelineColor: "bg-emerald-500",
-    icon: Package,
-    stage: 1
+    stage: 1,
+    icon: CircleDollarSign,
   },
   depositPaid: {
     label: "Deposit Paid",
-    color: "bg-amber-100 text-amber-800", 
+    color: "bg-amber-100 text-amber-800",
     badgeColor: "bg-amber-500 text-white",
     ribbonColor: "from-amber-500 to-orange-500",
-    timelineColor: "bg-amber-500",
+    stage: 2,
     icon: CreditCard,
-    stage: 2
   },
   preparingDelivery: {
     label: "Preparing Delivery",
     color: "bg-blue-100 text-blue-800",
     badgeColor: "bg-blue-600 text-white",
     ribbonColor: "from-blue-500 to-indigo-500",
-    timelineColor: "bg-blue-500",
+    stage: 3,
     icon: Package,
-    stage: 3
+  },
+  sellerScheduledPickup: {
+    label: "Pickup Scheduled",
+    color: "bg-sky-100 text-sky-800",
+    badgeColor: "bg-sky-600 text-white",
+    ribbonColor: "from-sky-500 to-blue-500",
+    stage: 3.5,
+    icon: Calendar,
   },
   inTransit: {
-    label: "In Transit",
+    label: "On The Way",
     color: "bg-purple-100 text-purple-800",
     badgeColor: "bg-purple-600 text-white",
     ribbonColor: "from-purple-500 to-violet-500",
-    timelineColor: "bg-purple-500",
+    stage: 4,
     icon: Truck,
-    stage: 4
   },
   delivered: {
     label: "Delivered",
     color: "bg-indigo-100 text-indigo-800",
     badgeColor: "bg-indigo-600 text-white",
     ribbonColor: "from-indigo-500 to-blue-500",
-    timelineColor: "bg-indigo-500",
+    stage: 5,
     icon: CheckCircle,
-    stage: 5
+  },
+  completionCheck: {
+    label: "Verification Pending",
+    color: "bg-cyan-100 text-cyan-800",
+    badgeColor: "bg-cyan-600 text-white",
+    ribbonColor: "from-cyan-500 to-blue-500",
+    stage: 5.5,
+    icon: ShieldCheck,
   },
   sold: {
     label: "Sold",
     color: "bg-gray-100 text-gray-800",
     badgeColor: "bg-gray-600 text-white",
     ribbonColor: "from-gray-500 to-gray-600",
-    timelineColor: "bg-gray-500",
+    stage: 6,
     icon: CheckCircle,
-    stage: 6
   },
   buyerDeclined: {
     label: "Buyer Declined",
     color: "bg-red-100 text-red-800",
     badgeColor: "bg-red-600 text-white",
     ribbonColor: "from-red-500 to-rose-500",
-    timelineColor: "bg-red-500",
-    icon: Ban,
     stage: 0,
-    isTerminal: true
+    isTerminal: true,
+    icon: Ban,
+  },
+  buyerDeclinedAtDoor: {
+    label: "Declined At Door",
+    color: "bg-rose-100 text-rose-800",
+    badgeColor: "bg-rose-600 text-white",
+    ribbonColor: "from-rose-500 to-pink-500",
+    stage: 0,
+    isTerminal: true,
+    icon: Ban,
   },
   cancelled: {
     label: "Cancelled",
     color: "bg-gray-100 text-gray-800",
     badgeColor: "bg-gray-600 text-white",
     ribbonColor: "from-gray-500 to-gray-600",
-    timelineColor: "bg-gray-500",
-    icon: Ban,
     stage: 0,
-    isTerminal: true
+    isTerminal: true,
+    icon: Ban,
   },
   autoClosed: {
     label: "Auto Closed",
     color: "bg-gray-100 text-gray-800",
     badgeColor: "bg-gray-600 text-white",
     ribbonColor: "from-gray-500 to-gray-600",
-    timelineColor: "bg-gray-500",
-    icon: Clock,
     stage: 0,
-    isTerminal: true
-  }
+    isTerminal: true,
+    icon: Clock,
+  },
 };
 
-/* ✅ FIX 13: Complete Premium Timeline Fix */
-const PremiumTimeline = ({ currentStatus, isBuyer = false }) => {
-  const mainStages = [
-    { key: "available", label: "Available" },
-    { key: "depositPaid", label: "Deposit Paid" },
-    { key: "preparingDelivery", label: "Preparing" },
-    { key: "inTransit", label: "In Transit" },
-    { key: "delivered", label: "Delivered" },
-    { key: "sold", label: "Sold" }
-  ];
-  
-  const terminalStages = ["buyerDeclined", "cancelled", "autoClosed"];
-  
-  // Check if current status is terminal
-  const isTerminal = terminalStages.includes(currentStatus);
-  const currentConfig = premiumStatusConfig[currentStatus] || premiumStatusConfig.available;
-  const currentStage = currentConfig.stage;
-  
-  if (isTerminal) {
-    return (
-      <div className="mt-4 mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
-        <div className="flex items-center gap-2 text-gray-700 mb-2">
-          <AlertCircle size={16} />
-          <span className="text-sm font-medium">Transaction Ended</span>
-        </div>
-        <div className={`text-sm px-3 py-1 rounded-full inline-block ${currentConfig.color} font-medium`}>
-          {currentConfig.label}
-        </div>
-        <p className="text-xs text-gray-500 mt-1">
-          This item is no longer available for purchase.
-        </p>
-      </div>
-    );
-  }
-  
-  return (
-    <div className="mt-4 mb-3">
-      <p className="text-xs font-medium text-gray-700 mb-2">
-        {isBuyer ? "Your Purchase Progress:" : "Delivery Progress:"}
-      </p>
-      <div className="flex items-center justify-between relative">
-        {mainStages.map((stage, index) => {
-          const stageNum = index + 1;
-          const isCompleted = stageNum <= currentStage;
-          const isCurrent = stageNum === currentStage;
-          const isBuyerStage = isBuyer && isCompleted;
-          const IconComponent = premiumStatusConfig[stage.key]?.icon || Package;
-          
-          return (
-            <div key={stage.key} className="flex flex-col items-center flex-1">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs z-10 ${
-                isBuyerStage 
-                  ? "bg-indigo-600 text-white ring-2 ring-indigo-300"
-                  : isCompleted 
-                  ? premiumStatusConfig[stage.key]?.badgeColor || "bg-gray-600 text-white"
-                  : "bg-gray-200 text-gray-400"
-              } ${isCurrent ? "ring-2 ring-offset-1 ring-blue-400" : ""}`}>
-                <IconComponent size={14} />
-              </div>
-              <span className={`text-xs mt-1 text-center ${
-                isBuyerStage ? "text-indigo-700 font-bold" :
-                isCompleted ? "text-gray-800 font-medium" : "text-gray-400"
-              }`}>
-                {stage.label}
-              </span>
-            </div>
-          );
-        })}
-        {/* Progress line */}
-        <div className="absolute top-4 left-0 right-0 h-0.5 bg-gray-200 -z-10">
-          <div 
-            className={`h-full transition-all duration-300 ${
-              currentStage >= 1 ? premiumStatusConfig[mainStages[currentStage - 1]?.key]?.timelineColor || "bg-emerald-500" : "bg-gray-300"
-            }`}
-            style={{ width: `${Math.min(((currentStage - 1) / (mainStages.length - 1)) * 100, 100)}%` }}
-          />
-        </div>
-      </div>
-    </div>
-  );
+const getPremiumStatusConfig = (item) => {
+  if (!item?.premiumStatus) return premiumStatusConfig.available;
+  return premiumStatusConfig[item.premiumStatus] || premiumStatusConfig.available;
 };
+
+// =======================================================
+// DELIVERABLE G: PERFORMANCE HELPERS
+// =======================================================
+
+/* ✅ G: Format time remaining */
+const formatTimeRemaining = (timestamp) => {
+  const end = parseTS(timestamp);
+  if (!end) return "Unknown";
+
+  const diff = end - Date.now();
+  if (diff <= 0) return "Closed";
+
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+  if (hours > 0) return `${hours}h ${mins}m left`;
+  return `${mins}m left`;
+};
+
+// =======================================================
+// HELPER FUNCTIONS
+// =======================================================
+
+const isCurrentUserOwner = (item, uid) => {
+  if (!item || !uid) return false;
+  return (item.ownerId && item.ownerId === uid) || (item.donorId && item.donorId === uid);
+};
+
+const isPremiumBuyer = (item, uid) => {
+  if (!item || !uid) return false;
+  return item.type === "premium" && item.buyerId === uid;
+};
+
+const isSponsoredItem = (item) => {
+  if (!item) return false;
+  return item.sponsored === true || item.donorType === 'admin' || item.sponsoredBy || item.status === 'sponsored';
+};
+
+const isPremiumAvailable = (item) => {
+  if (!item) return false;
+  return item.type === "premium" && item.premiumStatus === "available";
+};
+
+// =======================================================
+// MAIN COMPONENT
+// =======================================================
 
 export default function Items() {
   const navigate = useNavigate();
   const { currentUser, isSubscribed, trialCreditsLeft, isTrialExpired } = useAuth();
-
+  
+  // State
   const [items, setItems] = useState([]);
   const [viewItem, setViewItem] = useState(null);
   const [imageIndex, setImageIndex] = useState(0);
-  const [lastVisible, setLastVisible] = useState(null);
+  const [lastDoc, setLastDoc] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState("");
-  const [trialLeft, setTrialLeft] = useState(trialCreditsLeft || 0);
-  const [trialOver, setTrialOver] = useState(isTrialExpired || false);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+  const [initialLoadAttempted, setInitialLoadAttempted] = useState(false);
+  
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
 
-  /* ✅ FIX 7: Sync trial data */
-  useEffect(() => {
-    setTrialLeft(trialCreditsLeft);
-    setTrialOver(isTrialExpired);
-  }, [trialCreditsLeft, isTrialExpired]);
-
-  /* Load Items */
-  const fetchInitial = useCallback(async () => {
-    setLoading(true);
-    try {
-      const q = query(
-        collection(db, "donations"),
-        orderBy("createdAt", "desc"),
-        limit(PAGE_SIZE)
-      );
-      const snap = await getDocs(q);
-      const docs = snap.docs
-        .map((d) => {
-          const data = { id: d.id, ...d.data() };
-          // ✅ FIX 12: Apply backwards compatibility fixes
-          isValidItem(data);
-          return data;
-        })
-        .filter(item => item !== null);
-      
-      const filteredDocs = filterVisibleItems(docs);
-      
-      console.log("📦 Loaded items:", filteredDocs.length, 
-        "Free Active:", filteredDocs.filter(item => item.type !== 'premium' && ["active", "sponsored", "relisted"].includes(item.status)).length,
-        "Premium Available:", filteredDocs.filter(item => item.type === 'premium' && item.premiumStatus === 'available').length,
-        "Premium In Progress:", filteredDocs.filter(item => item.type === 'premium' && item.premiumStatus !== 'available').length
-      );
-      
-      setItems(filteredDocs);
-      setLastVisible(snap.docs[snap.docs.length - 1]);
-    } catch (error) {
-      console.error("Error loading items:", error);
-      toast.error("Failed to load items");
-    } finally {
-      setLoading(false);
-    }
+  // ✅ DELIVERABLE F & G: Preprocess items with memoization
+  const preprocessItems = useCallback((rawItems) => {
+    if (!Array.isArray(rawItems)) return [];
+    
+    const sanitized = rawItems
+      .map((it) => {
+        const sanitizedItem = sanitizeItem({ ...it });
+        return sanitizedItem;
+      })
+      .filter((it) => it !== null);
+    
+    const filtered = filterVisibleItems(sanitized);
+    
+    // Sort by creation date (newest first)
+    return filtered.sort((a, b) => {
+      const t1 = parseTS(a.createdAt) || 0;
+      const t2 = parseTS(b.createdAt) || 0;
+      return t2 - t1;
+    });
   }, []);
 
-  const loadMore = useCallback(async () => {
-    if (!lastVisible || loadingMore) return;
-    setLoadingMore(true);
+  // ✅ DELIVERABLE G: Load initial items
+  const loadItems = useCallback(async () => {
+    // Prevent multiple calls
+    if (initialLoadAttempted) return;
+    
+    setLoading(true);
+    
     try {
       const q = query(
         collection(db, "donations"),
         orderBy("createdAt", "desc"),
-        startAfter(lastVisible),
         limit(PAGE_SIZE)
       );
+      
       const snap = await getDocs(q);
-      if (!snap.empty) {
-        const newItems = snap.docs
-          .map((d) => {
-            const data = { id: d.id, ...d.data() };
-            isValidItem(data); // Apply fixes
-            return data;
-          })
-          .filter(item => item !== null);
-        
-        const filteredNewItems = filterVisibleItems(newItems);
-        
-        setItems((p) => [...p, ...filteredNewItems]);
-        setLastVisible(snap.docs[snap.docs.length - 1]);
+      
+      if (snap.empty) {
+        setItems([]);
+        setLastDoc(null);
+        setHasMore(false);
+        return;
       }
-    } catch (error) {
-      console.error("Error loading more items:", error);
-      toast.error("Failed to load more items");
+      
+      const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const processed = preprocessItems(docs);
+      
+      setItems(processed);
+      setLastDoc(snap.docs[snap.docs.length - 1] || null);
+      setHasMore(snap.docs.length === PAGE_SIZE);
+      
+    } catch (err) {
+      console.error("Error loading items:", err);
+      toast.error("Failed to load items.");
+      setItems([]);
+    } finally {
+      setLoading(false);
+      setInitialLoadAttempted(true);
+    }
+  }, [preprocessItems, initialLoadAttempted]);
+
+  // ✅ DELIVERABLE G: Load more with pagination
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || !lastDoc) return;
+    
+    setLoadingMore(true);
+    
+    try {
+      const q = query(
+        collection(db, "donations"),
+        orderBy("createdAt", "desc"),
+        startAfter(lastDoc),
+        limit(PAGE_SIZE)
+      );
+      
+      const snap = await getDocs(q);
+      
+      if (snap.empty) {
+        setHasMore(false);
+        return;
+      }
+      
+      const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const processed = preprocessItems(docs);
+      
+      setItems((prev) => [...prev, ...processed]);
+      setLastDoc(snap.docs[snap.docs.length - 1] || null);
+      setHasMore(snap.docs.length === PAGE_SIZE);
+      
+    } catch (err) {
+      console.error("Error loading more items:", err);
+      toast.error("Failed to load more items.");
     } finally {
       setLoadingMore(false);
     }
-  }, [lastVisible, loadingMore]);
+  }, [loadingMore, hasMore, lastDoc, preprocessItems]);
 
-  useEffect(() => {
-    fetchInitial();
-  }, [fetchInitial]);
+  // ✅ DELIVERABLE G: Throttled infinite scroll
+  const handleScroll = useCallback(
+    throttle(() => {
+      if (loadingMore || !hasMore) return;
+      
+      const bottom =
+        window.innerHeight + window.scrollY >=
+        document.documentElement.scrollHeight - 300;
+      
+      if (bottom) loadMore();
+    }, 600),
+    [loadMore, loadingMore, hasMore]
+  );
 
-  // Infinite scroll
+  // Set up scroll listener
   useEffect(() => {
-    const handleScroll = throttle(() => {
-      const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
-      if (scrollHeight - scrollTop - clientHeight < 400) loadMore();
-    }, 400);
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
-  }, [loadMore]);
+  }, [handleScroll]);
 
-  // ✅ FIX 6: Keyboard navigation for drawer images
+  // Initial load
+  const mountedRef = useRef(false);
+  
+  useEffect(() => {
+    if (mountedRef.current || initialLoadAttempted) return;
+    
+    mountedRef.current = true;
+    loadItems();
+  }, [loadItems, initialLoadAttempted]);
+
+  // ✅ DELIVERABLE G: Keyboard navigation
   useEffect(() => {
     const handleKey = (e) => {
       if (e.key === "Escape") setViewItem(null);
@@ -457,694 +484,769 @@ export default function Items() {
     return () => window.removeEventListener("keydown", handleKey);
   }, [viewItem]);
 
-  /* ✅ FIX 2 & 5: Handle Request with premium guard */
-  const handleRequest = useCallback(
-    async (item) => {
-      // ✅ FIX 2: Premium items should never enter free request flow
-      if (item.type === "premium") {
-        toast.error("This is a premium item - please use purchase flow.");
-        return;
-      }
+  // ✅ DELIVERABLE G: Search filtering with memoization
+  const displayedItems = useMemo(() => {
+    if (!search.trim()) return items;
+    
+    const s = search.toLowerCase();
+    return items.filter(
+      (it) =>
+        it.title?.toLowerCase().includes(s) ||
+        it.category?.toLowerCase().includes(s) ||
+        it.description?.toLowerCase().includes(s)
+    );
+  }, [search, items]);
 
-      if (!currentUser) {
-        toast.error("🔑 Please log in to request items.");
-        navigate("/login");
-        return;
-      }
-      if (submitting) return;
-      setSubmitting(true);
+  // ✅ DELIVERABLE G: Auto-scroll to top when search changes
+  useEffect(() => {
+    if (search.trim()) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [search]);
 
-      try {
-        // ✅ FIX 5: Check if user owns the item
-        if (item.donorId === currentUser.uid) {
-          toast.error("🚫 You cannot request your own donation.");
-          setSubmitting(false);
-          return;
-        }
-
-        const rqSnap = await getDocs(
-          query(
-            collection(db, "requests"),
-            where("itemId", "==", item.id),
-            where("userId", "==", currentUser.uid)
-          )
-        );
-        if (!rqSnap.empty) {
-          toast("⚠️ You already requested this item.", {
-            icon: "⚠️",
-            style: { borderLeft: "4px solid #F59E0B" },
-          });
-          setSubmitting(false);
-          return;
-        }
-
-        // Double-check: premium items should never reach here
-        if (item.type === "premium") {
-          toast.error("This is a premium item - please use purchase flow.");
-          setSubmitting(false);
-          return;
-        }
-        
-        // ✅ FIX 5: Use proper free item requestable check
-        if (!isFreeRequestable(item)) {
-          toast("🎁 This item is no longer available.");
-          setSubmitting(false);
-          return;
-        }
-
-        // ✅ FIX 14: Check if item is closed (expired)
-        if (isFreeItemClosed(item)) {
-          toast("⏰ Request window is closed for this item.");
-          setSubmitting(false);
-          return;
-        }
-
-        // ✅ FIX 7: Trial enforcement
-        if (!isSubscribed && (trialOver || trialLeft <= 0)) {
-          toast(
-            "🎁 You've used all free requests. Please deposit ¥1,500 to continue!",
-            { icon: "🙏" }
-          );
-          setShowSubscriptionModal(true);
-          setSubmitting(false);
-          return;
-        }
-
-        await onRequestCreateAddTicket({ itemId: item.id });
-        toast.success("✅ Request submitted!");
-
-        if (!isSubscribed) {
-          try {
-            // ✅ FIX 7: Handle trial credit decrement properly
-            const result = await decrementTrialCredit();
-            if (result?.trialCreditsLeft !== undefined) {
-              toast.success(`Remaining credits: ${result.trialCreditsLeft}`);
-            }
-            if (result?.isTrialExpired) {
-              setShowSubscriptionModal(true);
-            }
-          } catch (creditError) {
-            console.error("Error decrementing trial credit:", creditError);
-          }
-        }
-
-        setViewItem(null);
-      } catch (err) {
-        console.error("Request error:", err);
-        toast.error("❌ Failed to submit request.");
-      } finally {
-        setSubmitting(false);
-      }
-    },
-    [currentUser, navigate, isSubscribed, trialOver, submitting, trialLeft]
-  );
-
-  const isCurrentUserOwner = useCallback(
-    (item) => currentUser && item.donorId === currentUser.uid,
-    [currentUser]
-  );
-
-  const isPremiumBuyer = useCallback((item) => {
-    return item.type === "premium" && item.buyerId === currentUser?.uid;
-  }, [currentUser]);
-
-  const isSponsoredItem = useCallback((item) => {
-    return item.isSponsored || item.donorType === 'admin' || item.sponsoredBy || item.status === 'sponsored';
-  }, []);
-
-  const isPremiumAvailable = useCallback((item) => {
-    return item.type === "premium" && item.premiumStatus === "available";
-  }, []);
-
-  const getPremiumStatusConfig = useCallback((item) => {
-    const status = item.premiumStatus || "available";
-    return premiumStatusConfig[status] || premiumStatusConfig.available;
-  }, []);
-
-  // ✅ FIX 3: Refresh function
+  // ✅ DELIVERABLE F: Refresh single item
   const refreshItemData = useCallback(async () => {
     if (!viewItem?.id) return;
     
     try {
-      const itemDoc = await getDoc(doc(db, "donations", viewItem.id));
-      if (itemDoc.exists()) {
-        const updatedItem = { id: itemDoc.id, ...itemDoc.data() };
-        // ✅ FIX 12: Apply backwards compatibility
-        isValidItem(updatedItem);
-        setViewItem(updatedItem);
-        
-        setItems(prev => prev.map(item => 
-          item.id === viewItem.id ? updatedItem : item
-        ));
+      const docRef = doc(db, "donations", viewItem.id);
+      const snap = await getDoc(docRef);
+      
+      if (!snap.exists()) {
+        toast.error("Item no longer exists.");
+        setViewItem(null);
+        return;
       }
-    } catch (error) {
-      console.error("Error refreshing item data:", error);
+      
+      const updated = sanitizeItem({ id: snap.id, ...snap.data() });
+      
+      setItems((prev) =>
+        prev.map((it) => (it.id === updated.id ? updated : it))
+      );
+      
+      setViewItem(updated);
+    } catch (err) {
+      console.error("Error refreshing item data:", err);
     }
   }, [viewItem]);
 
-  // ✅ FIX 4: Premium action handler
-  const handlePremiumAction = useCallback(async (newStatus, successMessage) => {
-    if (!viewItem?.id) return;
+  // =======================================================
+  // ✅ DELIVERABLE A: FREE ITEM REQUEST HANDLER
+  // =======================================================
+  const handleRequest = useCallback(async (item) => {
+    // ✅ A: Premium guard
+    if (item.type === "premium") {
+      toast.error("This is a premium item - please use purchase flow.");
+      return;
+    }
+    
+    if (!currentUser) {
+      toast.error("🔑 Please log in to request items.");
+      navigate("/login");
+      return;
+    }
+    
+    // ✅ A: Cannot request own item
+    if (isCurrentUserOwner(item, currentUser.uid)) {
+      toast.error("🚫 You cannot request your own item.");
+      return;
+    }
+    
+    // ✅ A: Check if requestable
+    if (!isFreeRequestable(item)) {
+      toast.error("🎁 This item is no longer available.");
+      return;
+    }
+    
+    // ✅ A: Check if window closed
+    if (isFreeItemClosed(item)) {
+      toast.error("⏰ Request window is closed for this item.");
+      return;
+    }
+    
+    // ✅ A: Trial credit check
+    if (!isSubscribed && (isTrialExpired || trialCreditsLeft <= 0)) {
+      toast(
+        "🎁 You've used all free requests. Please subscribe to continue!",
+        { icon: "🙏" }
+      );
+      setShowSubscriptionModal(true);
+      return;
+    }
+    
+    setSubmitting(true);
     
     try {
-      const result = await updatePremiumStatus({ 
-        itemId: viewItem.id, 
-        status: newStatus 
+      // ✅ A: Unify request creation
+      const result = await onRequestCreateAddTicket({
+        itemId: item.id,
+        ownerId: item.ownerId,
       });
       
-      if (result?.ok) {
-        await refreshItemData();
-        toast.success(successMessage || "Status updated successfully!");
-      } else {
-        toast.error("Failed to update premium status");
+      if (!result?.success) {
+        throw new Error(result?.message || "Request failed.");
       }
-    } catch (error) {
-      console.error("Error handling premium action:", error);
-      toast.error("Failed to update premium status");
+      
+      // ✅ A: Deduct trial credit for non-subscribed users
+      if (!isSubscribed) {
+        try {
+          await decrementTrialCredit();
+        } catch (creditError) {
+          console.error("Error decrementing trial credit:", creditError);
+        }
+      }
+      
+      toast.success("✅ Request submitted successfully!");
+      await refreshItemData();
+      setViewItem(null);
+    } catch (err) {
+      console.error("handleRequest error:", err);
+      toast.error(err.message || "Failed to submit request.");
+    } finally {
+      setSubmitting(false);
     }
-  }, [viewItem, refreshItemData]);
+  }, [currentUser, navigate, isSubscribed, isTrialExpired, trialCreditsLeft, refreshItemData]);
 
+  // =======================================================
+  // ✅ DELIVERABLE D & F: PREMIUM ACTION HANDLER
+  // =======================================================
+  // =======================================================
+// PATCHED PREMIUM STATUS HANDLER (FINAL PHASE-2)
+// =======================================================
+const handlePremiumAction = useCallback(
+  async (newStatus, extraPayload = {}) => {
+    if (!viewItem) return;
+
+    try {
+      // 🔥 THIS WAS MISSING: direct backend status update
+      const result = await updatePremiumStatus({
+        itemId: viewItem.id,
+        newStatus,
+        ...extraPayload,
+      });
+
+      if (!result?.success) {
+        throw new Error(result?.message || "Premium status update failed.");
+      }
+
+      // 💬 Local UI feedback
+      switch (newStatus) {
+        case "depositPaid":
+          toast.success("Deposit confirmed. Seller will prepare delivery.");
+          break;
+        case "preparingDelivery":
+          toast.success("Delivery preparation started.");
+          break;
+        case "sellerScheduledPickup":
+          toast.success("Pickup schedule submitted.");
+          break;
+        case "inTransit":
+          toast.success("Item is now in transit.");
+          break;
+        case "delivered":
+          toast.success("Item marked as delivered.");
+          break;
+        case "completionCheck":
+          toast.success("Awaiting confirmation from both parties.");
+          break;
+        case "sold":
+          toast.success("Transaction completed!");
+          break;
+        case "buyerDeclinedAtDoor":
+          toast.error("Buyer declined the item at delivery.");
+          break;
+        case "cancelled":
+          toast.error("Order cancelled.");
+          break;
+        default:
+          toast.success("Status updated.");
+      }
+
+      await refreshItemData();
+    } catch (err) {
+      console.error("❌ handlePremiumAction error:", err);
+      toast.error(err.message || "Could not update premium status.");
+    }
+  },
+  [viewItem, refreshItemData]
+);
+
+
+  // =======================================================
+  // MEMOIZED HELPER FUNCTIONS
+  // =======================================================
+  
+  const isCurrentUserOwnerMemo = useCallback(
+    (item) => isCurrentUserOwner(item, currentUser?.uid),
+    [currentUser]
+  );
+
+  const isPremiumBuyerMemo = useCallback(
+    (item) => isPremiumBuyer(item, currentUser?.uid),
+    [currentUser]
+  );
+
+  const isSponsoredItemMemo = useCallback(
+    (item) => isSponsoredItem(item),
+    []
+  );
+
+  const isPremiumAvailableMemo = useCallback(
+    (item) => isPremiumAvailable(item),
+    []
+  );
+
+  const getPremiumStatusConfigMemo = useCallback(
+    (item) => getPremiumStatusConfig(item),
+    []
+  );
+
+  // =======================================================
+  // CALCULATE COUNTERS
+  // =======================================================
+  
+  const freeItemsCount = useMemo(() => {
+    // Only count active free items (not closed or sold)
+    return items.filter(item => 
+      item.type !== 'premium' && 
+      ["active", "sponsored", "relisted"].includes(item.status) &&
+      !isFreeItemClosed(item)
+    ).length;
+  }, [items]);
+
+  const premiumItemsCount = useMemo(() => {
+    // Only count available premium items
+    return items.filter(item => 
+      item.type === 'premium' && 
+      item.premiumStatus === "available"
+    ).length;
+  }, [items]);
+
+  const totalVisibleItems = useMemo(() => {
+    // Total items that should be visible to user
+    return displayedItems.length;
+  }, [displayedItems]);
+
+  // =======================================================
+  // RENDER
+  // =======================================================
+  
   return (
-    <div className="min-h-screen bg-gray-50 relative w-full overflow-x-hidden">
+    <div className="min-h-screen bg-gray-50">
       <SubscriptionBanner />
       
-      <div className="bg-white/90 backdrop-blur border-b border-gray-100 py-3 px-4 flex justify-center sticky top-0 z-30 shadow-sm">
-        <div className="relative w-full max-w-md sm:max-w-lg md:max-w-xl">
-          <Search className="absolute left-3 top-2.5 text-gray-400 w-4 h-4" />
-          <input
-            value={search}
-            // ✅ FIX 9: Search input fix
-            onChange={(e) =>
-              setSearch(e.target.value.replace(/[^a-zA-Z0-9\s]/g, ""))
-            }
-            placeholder="Search items or categories"
-            className="w-full pl-9 pr-3 py-2 rounded-full border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none text-sm sm:text-base bg-white placeholder-gray-400"
-          />
+      {/* Header */}
+      <div className="bg-white shadow-sm py-4 px-4 border-b border-gray-200 sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Browse Items</h1>
+              <p className="text-gray-600 mt-1">Find free and premium items</p>
+            </div>
+            {currentUser && !isSubscribed && trialCreditsLeft > 0 && (
+              <div className="text-sm">
+                <span className="text-amber-600 font-medium">
+                  {trialCreditsLeft} free request{trialCreditsLeft !== 1 ? 's' : ''} left
+                </span>
+              </div>
+            )}
+          </div>
+          
+          <div className="mt-4 relative max-w-md">
+            <div className="relative">
+              <Search className="absolute left-3 top-3.5 h-5 w-5 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search items, categories..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white"
+              />
+            </div>
+          </div>
         </div>
       </div>
 
-      <main className="page-container py-4 sm:py-6 px-4 sm:px-6">
+      {/* Main content */}
+      <main className="max-w-7xl mx-auto p-4 sm:p-6">
         {loading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 sm:gap-6 animate-pulse">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="bg-white h-56 sm:h-64 rounded-xl shadow-sm" />
-            ))}
+          <div className="flex flex-col items-center justify-center py-20">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
+            <p className="text-lg text-gray-600">Loading items...</p>
           </div>
         ) : items.length === 0 ? (
-          <p className="text-center text-gray-600 py-20 text-sm sm:text-base">
-            No items available.
-          </p>
+          <div className="text-center py-20 bg-white rounded-lg shadow-sm border border-gray-200">
+            <div className="text-5xl mb-4 text-gray-400">📦</div>
+            <h3 className="text-2xl font-semibold text-gray-900 mb-3">No Items Found</h3>
+            <p className="text-gray-600 mb-6 max-w-md mx-auto">
+              There are currently no items available.
+            </p>
+            <button
+              onClick={loadItems}
+              className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"
+            >
+              Refresh Items
+            </button>
+          </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-5">
-            {items
-              .filter((item) =>
-                search
-                  ? item.title?.toLowerCase().includes(search.toLowerCase()) ||
-                    item.category?.toLowerCase().includes(search.toLowerCase())
-                  : true
-              )
-              .map((item) => {
-                const isPremium = item.type === "premium";
-                const isClosed = isFreeItemClosed(item);
-                const isOwner = isCurrentUserOwner(item);
-                const isBuyer = isPremiumBuyer(item);
-                const isSponsored = isSponsoredItem(item);
-                const isRelisted = item.status === "relisted";
-                const premiumAvailable = isPremiumAvailable(item);
-                const premiumConfig = getPremiumStatusConfig(item);
-                const isRequestable = isFreeRequestable(item) && !isClosed;
+          <>
+            {/* Stats - UPDATED: Show only available free items and available premium items */}
+            <div className="mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+                <div className="text-3xl font-bold text-gray-900">{totalVisibleItems}</div>
+                <div className="text-sm text-gray-600 mt-1">Total Visible Items</div>
+              </div>
+              <div className="bg-emerald-50 p-6 rounded-lg shadow-sm border border-emerald-200">
+                <div className="text-3xl font-bold text-emerald-700">
+                  {freeItemsCount}
+                </div>
+                <div className="text-sm text-emerald-600 mt-1">Available Free Items</div>
+                <div className="text-xs text-emerald-500 mt-1">
+                  (Requestable & Not Closed)
+                </div>
+              </div>
+              <div className="bg-indigo-50 p-6 rounded-lg shadow-sm border border-indigo-200">
+                <div className="text-3xl font-bold text-indigo-700">
+                  {premiumItemsCount}
+                </div>
+                <div className="text-sm text-indigo-600 mt-1">Available Premium Items</div>
+                <div className="text-xs text-indigo-500 mt-1">
+                  (Ready to Purchase)
+                </div>
+              </div>
+            </div>
 
-                return (
-                  <div
-                    key={item.id}
-                    className={`relative rounded-2xl shadow hover:shadow-lg transition-all duration-200 cursor-pointer group overflow-hidden ${
-                      // ✅ FIX 10: Cosmetic fixes - gradient ribbons
-                      isSponsored 
-                        ? 'bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-200' 
-                        : isRelisted
-                        ? 'bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200'
-                        : isPremium
-                        ? 'bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200'
-                        : 'bg-white'
-                    }`}
-                    onClick={() => {
-                      setViewItem(item);
-                      setImageIndex(0);
-                    }}
+            {/* Search results info */}
+            {search && (
+              <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <p className="text-blue-800">
+                  Showing {displayedItems.length} result{displayedItems.length !== 1 ? 's' : ''} for "{search}"
+                  {displayedItems.length === 0 && " - try different keywords"}
+                </p>
+              </div>
+            )}
+
+            {/* Items grid */}
+            <div className="mb-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">
+                  Available Items {search && `(${displayedItems.length})`}
+                </h2>
+                {!search && (
+                  <div className="text-sm text-gray-500">
+                    Sorted by newest first
+                  </div>
+                )}
+              </div>
+              
+              {displayedItems.length === 0 ? (
+                <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+                  <div className="text-3xl mb-4 text-gray-300">🔍</div>
+                  <p className="text-gray-600">No items match your search "{search}"</p>
+                  <button
+                    onClick={() => setSearch("")}
+                    className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"
                   >
-                    {/* ✅ FIX 10: Premium Status Ribbon */}
-                    {isPremium && item.premiumStatus !== "available" && (
-                      <div className={`absolute top-2 left-0 right-0 z-20 bg-gradient-to-r ${premiumConfig.ribbonColor} text-white text-xs px-3 py-1 text-center font-semibold`}>
-                        {premiumConfig.label}
-                      </div>
-                    )}
-
-                    {/* Premium Sold Out Overlay */}
-                    {isPremium && item.premiumStatus === "sold" && (
-                      <div className="absolute inset-0 bg-black/60 z-30 flex items-center justify-center">
-                        <div className="bg-white/90 text-gray-800 px-4 py-2 rounded-lg font-bold text-sm">
-                          SOLD OUT
+                    Clear Search
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                  {displayedItems.map((item) => {
+                    const isPremium = item.type === "premium";
+                    const premiumCfg = getPremiumStatusConfigMemo(item);
+                    const closed = isFreeItemClosed(item);
+                    const owner = isCurrentUserOwnerMemo(item);
+                    const buyer = isPremiumBuyerMemo(item);
+                    const sponsored = isSponsoredItemMemo(item);
+                    const requestable = !isPremium && isFreeRequestable(item) && !closed && !owner;
+                    const premiumAvailable = isPremium && item.premiumStatus === "available";
+                    
+                    return (
+                      <div
+                        key={item.id}
+                        className={`bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-lg transition-all duration-200 transform hover:-translate-y-1 cursor-pointer ${
+                          !requestable && !premiumAvailable && !owner
+                            ? "opacity-80 border-gray-300"
+                            : "border-gray-200"
+                        }`}
+                        onClick={() => {
+                          setViewItem(item);
+                          setImageIndex(0);
+                        }}
+                      >
+                        {/* Image with badges */}
+                        <div className="relative h-56 bg-gray-100">
+                          <img
+                            src={item.images?.[0] || "/images/default-item.jpg"}
+                            alt={item.title}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              e.target.src = "/images/default-item.jpg";
+                            }}
+                          />
+                          
+                          {/* Badges */}
+                          <div className="absolute top-2 right-2 flex flex-col gap-1">
+                            {sponsored && (
+                              <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white text-xs px-2 py-1 rounded-full font-semibold flex items-center gap-1">
+                                <Crown size={10} /> Sponsored
+                              </div>
+                            )}
+                            
+                            {owner && (
+                              <div className="bg-yellow-500 text-white text-xs px-2 py-1 rounded-full font-semibold">
+                                Your Item
+                              </div>
+                            )}
+                            
+                            {isPremium && buyer && (
+                              <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs px-2 py-1 rounded-full font-semibold flex items-center gap-1">
+                                <User size={10} /> Your Purchase
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Premium ribbon */}
+                          {isPremium && item.premiumStatus !== "available" && (
+                            <div className={`absolute top-2 left-0 right-0 bg-gradient-to-r ${premiumCfg.ribbonColor} text-white text-xs py-1 text-center font-semibold`}>
+                              {premiumCfg.label}
+                            </div>
+                          )}
+                          
+                          {/* Price overlay */}
+                          <div className={`absolute bottom-0 left-0 right-0 px-4 py-2 ${
+                            isPremium 
+                              ? "bg-gradient-to-r from-indigo-600/90 to-purple-600/90" 
+                              : "bg-gradient-to-r from-emerald-600/90 to-green-600/90"
+                          }`}>
+                            <div className="text-white font-bold text-lg">
+                              {isPremium 
+                                ? `¥${item.price?.toLocaleString() || "0"}` 
+                                : "FREE"}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    )}
-
-                    {/* ✅ FIX 10: Status Badges - fixed stacking */}
-                    <div className="absolute top-2 right-2 z-20 flex flex-col gap-1">
-                      {isSponsored && (
-                        <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white text-xs px-2 py-1 rounded-full font-semibold flex items-center gap-1">
-                          <Crown size={12} />
-                          Sponsored
-                        </div>
-                      )}
-                      
-                      {isRelisted && (
-                        <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white text-xs px-2 py-1 rounded-full font-semibold">
-                          🔄 Relisted
-                        </div>
-                      )}
-
-                      {/* ✅ FIX 7: Premium Buyer Badge */}
-                      {isPremium && isBuyer && (
-                        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs px-2 py-1 rounded-full font-semibold flex items-center gap-1">
-                          <User size={12} />
-                          Your Purchase
-                        </div>
-                      )}
-
-                      {/* ✅ FIX 10: Premium Available Badge */}
-                      {isPremium && premiumAvailable && (
-                        <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white text-xs px-2 py-1 rounded-full font-semibold">
-                          Available
-                        </div>
-                      )}
-                    </div>
-
-                    {isOwner && (
-                      <div className="absolute top-2 left-2 z-20 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full font-semibold">
-                        Your Item
-                      </div>
-                    )}
-
-                    <div className="h-44 sm:h-52 bg-gray-100 flex items-center justify-center overflow-hidden">
-                      {item.images?.[0] ? (
-                        // ✅ FIX 10: Fixed image object-contain vs cover
-                        <img
-                          src={item.images[0]}
-                          alt={item.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                      ) : (
-                        <span className="text-gray-400 text-xs">No Image</span>
-                      )}
-                    </div>
-
-                    <div className="p-3 sm:p-4">
-                      <h2 className="text-sm sm:text-base font-semibold line-clamp-2 h-10 sm:h-12 text-gray-800">
-                        {item.title}
-                      </h2>
-                      <p className="text-xs sm:text-sm text-gray-500 mb-1">
-                        {item.category || ""}
-                      </p>
-
-                      {/* ⏱️ Time or Status */}
-                      {!isPremium && (
-                        <p
-                          className={`text-xs sm:text-sm font-medium ${
-                            isClosed
-                              ? "text-gray-400"
-                              : "text-emerald-600"
-                          }`}
-                        >
-                          {isClosed
-                            ? "⏰ Request Closed"
-                            : `⏱️ ${formatTimeRemaining(item.requestWindowEnd)}`}
-                        </p>
-                      )}
-
-                      {/* ✅ FIX 10: Premium Status Display */}
-                      {isPremium && (
-                        <div className={`text-xs px-2 py-1 rounded-full inline-block ${premiumConfig.color} font-medium`}>
-                          {premiumConfig.label}
-                        </div>
-                      )}
-
-                      {/* ✅ FIX 10: Price + Size + Delivery Estimate row */}
-                      <div className="flex flex-col gap-0.5 mt-1">
-                        <div className="flex items-center justify-between">
-                          {isPremium ? (
-                            <span className="text-indigo-600 font-bold text-sm sm:text-base">
-                              ¥{item.price?.toLocaleString() || item.priceJPY?.toLocaleString() || "—"}
-                            </span>
-                          ) : (
-                            <span className="text-emerald-600 font-semibold text-sm sm:text-base">
-                              FREE
+                        
+                        {/* Content */}
+                        <div className="p-5">
+                          <h3 className="font-bold text-gray-900 text-lg mb-2 line-clamp-2 leading-tight">
+                            {item.title}
+                          </h3>
+                          
+                          <p className="text-gray-600 text-sm mb-3">
+                            {item.category || "Uncategorized"}
+                          </p>
+                          
+                          {/* Free item timer */}
+                          {!isPremium && (
+                            <p className={`text-xs font-medium mb-3 ${closed ? "text-gray-400" : "text-emerald-600"}`}>
+                              {closed ? "⏰ Request Closed" : `⏱ ${formatTimeRemaining(item.requestWindowEnd)}`}
+                            </p>
+                          )}
+                          
+                          {/* Premium status chip */}
+                          {isPremium && (
+                            <span className={`inline-block text-xs px-2 py-1 rounded-full ${premiumCfg.color} font-medium`}>
+                              {premiumCfg.label}
                             </span>
                           )}
-                          {item.verified && (
-                            <span className="text-[10px] sm:text-xs bg-green-600 text-white px-1.5 py-0.5 rounded">
-                              Verified
-                            </span>
-                          )}
-                        </div>
-
-                        {/* ✅ FIX 10: Fixed size + delivery row */}
-                        <div className="flex justify-between text-[11px] text-gray-500 mt-0.5">
-                          {item.size && (
-                            <span className="capitalize">📦 {item.size}</span>
-                          )}
-                          {item.estimatedDelivery?.min &&
-                            item.estimatedDelivery?.max && (
-                              <span className="text-gray-400">
-                                ¥{item.estimatedDelivery.min.toLocaleString()}–
-                                ¥{item.estimatedDelivery.max.toLocaleString()}
+                          
+                          {/* Availability indicator */}
+                          <div className="mt-2">
+                            {!isPremium && (
+                              <span className={`text-xs ${requestable ? "text-emerald-600" : "text-gray-500"}`}>
+                                {requestable ? "✅ Available for Request" : "❌ Not Available"}
                               </span>
                             )}
+                            {isPremium && (
+                              <span className={`text-xs ${premiumAvailable ? "text-indigo-600" : "text-gray-500"}`}>
+                                {premiumAvailable ? "✅ Available for Purchase" : "❌ Not Available"}
+                              </span>
+                            )}
+                          </div>
+                          
+                          <div className="flex items-center justify-between pt-3 border-t border-gray-100 mt-3">
+                            <div className="text-xs text-gray-500">
+                              {item.size && `📦 ${item.size}`}
+                            </div>
+                            <span className="text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+                              View Details →
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-        )}
-
-        {loadingMore && (
-          <div className="text-center text-gray-500 mt-6 animate-pulse">
-            ⏳ Loading more items…
-          </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            
+            {/* Load more / End of results */}
+            {loadingMore ? (
+              <div className="text-center py-8">
+                <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"></div>
+                <p className="text-gray-600 mt-2">Loading more items...</p>
+              </div>
+            ) : !hasMore && displayedItems.length > 0 && (
+              <div className="text-center py-8 text-gray-500">
+                <p>You've reached the end of the list</p>
+                <p className="text-sm mt-1">{displayedItems.length} items shown</p>
+              </div>
+            )}
+          </>
         )}
       </main>
 
-      {/* ✅ FIX 6 & 15: Enhanced Drawer */}
+      {/* Modal */}
       {viewItem && (
-        <div
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex justify-center items-end md:items-center"
+        <div 
+          className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50"
           onClick={() => setViewItem(null)}
         >
-          <div
-            className={`bg-white rounded-t-2xl md:rounded-lg shadow-xl w-full md:w-[90%] max-w-md p-6 relative max-h-[90vh] overflow-y-auto ${
-              // ✅ FIX 10: Fixed border-left accent for each item state
-              isSponsoredItem(viewItem)
-                ? "border-l-4 border-purple-500"
-                : viewItem.status === "relisted"
-                ? "border-l-4 border-green-500"
-                : viewItem.type === "premium"
-                ? "border-l-4 border-indigo-500"
-                : "border-l-4 border-emerald-500"
-            }`}
+          <div 
+            className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* CLOSE BUTTONS */}
-            <button
-              onClick={() => setViewItem(null)}
-              className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-              aria-label="Close drawer"
-            >
-              <X size={22} />
-            </button>
-            <button
-              onClick={() => setViewItem(null)}
-              className="absolute top-3 left-3 text-gray-500 hover:text-gray-700 md:hidden"
-              aria-label="Back"
-            >
-              <ArrowLeft size={22} />
-            </button>
-
-            {/* ✅ FIX 15: Owner Label */}
-            {isCurrentUserOwner(viewItem) && (
-              <div className="absolute top-3 left-12 bg-yellow-500 text-white text-sm px-3 py-1 rounded-full font-semibold z-10">
-                Your Item
-              </div>
-            )}
-
-            {/* ✅ FIX 15: Sponsored */}
-            {isSponsoredItem(viewItem) && (
-              <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white text-sm px-4 py-2 rounded-lg mb-4 flex items-center gap-2">
-                <Crown size={16} />
-                <span className="font-semibold">
-                  Sponsored by {viewItem.sponsoredBy || "Freebies Japan"}
-                </span>
-              </div>
-            )}
-
-            {/* ✅ FIX 15: Relisted */}
-            {viewItem.status === "relisted" && (
-              <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white text-sm px-4 py-2 rounded-lg mb-4 flex items-center gap-2">
-                <span className="font-semibold">🔄 This item has been relisted</span>
-              </div>
-            )}
-
-            {/* ✅ FIX 15: Premium Status Header */}
-            {viewItem.type === "premium" && viewItem.premiumStatus !== "available" && (
-              <div
-                className={`bg-gradient-to-r ${
-                  getPremiumStatusConfig(viewItem).ribbonColor
-                } text-white text-sm px-4 py-2 rounded-lg mb-4 flex items-center gap-2`}
-              >
-                {React.createElement(
-                  getPremiumStatusConfig(viewItem).icon,
-                  { size: 16 }
-                )}
-                <span className="font-semibold">
-                  {getPremiumStatusConfig(viewItem).label}
-                </span>
-              </div>
-            )}
-
-            {/* ✅ FIX 6 & 15: Image Carousel */}
-            <div 
-              className="relative w-full h-56 bg-gray-100 rounded-lg overflow-hidden mb-3 flex items-center justify-center"
-              onTouchStart={(e) => touchStartX.current = e.touches[0].clientX}
-              onTouchEnd={(e) => {
-                touchEndX.current = e.changedTouches[0].clientX;
-                const diff = touchStartX.current - touchEndX.current;
-                if (Math.abs(diff) > 50) {
-                  if (diff > 0) {
-                    // Swipe left
-                    setImageIndex((i) => (i + 1) % (viewItem.images?.length || 1));
-                  } else {
-                    // Swipe right
-                    setImageIndex((i) => (i - 1 + (viewItem.images?.length || 1)) % (viewItem.images?.length || 1));
-                  }
-                }
-              }}
-            >
-              {viewItem.images?.length ? (
-                <>
-                  <img
-                    src={viewItem.images[imageIndex]}
-                    alt="Item"
-                    className="object-contain w-full h-full"
-                  />
-                  {viewItem.images.length > 1 && (
-                    <>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setImageIndex(
-                            (i) =>
-                              (i - 1 + viewItem.images.length) %
-                              viewItem.images.length
-                          );
-                        }}
-                        className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white rounded-full p-1 transition-colors"
-                        aria-label="Previous image"
-                      >
-                        <ChevronLeft size={18} />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setImageIndex((i) => (i + 1) % viewItem.images.length);
-                        }}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white rounded-full p-1 transition-colors"
-                        aria-label="Next image"
-                      >
-                        <ChevronRight size={18} />
-                      </button>
-                      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
-                        {imageIndex + 1} / {viewItem.images.length}
+            <div className="p-6">
+              {/* Modal header */}
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">{viewItem.title}</h2>
+                  <div className="flex items-center gap-2 mt-2">
+                    <div className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${
+                      viewItem.type === "premium" 
+                        ? "bg-indigo-100 text-indigo-800" 
+                        : "bg-emerald-100 text-emerald-800"
+                    }`}>
+                      {viewItem.type === "premium" ? "PREMIUM ITEM" : "FREE ITEM"}
+                    </div>
+                    {isCurrentUserOwnerMemo(viewItem) && (
+                      <div className="bg-yellow-500 text-white text-xs px-2 py-1 rounded-full">
+                        Your Item
                       </div>
-                    </>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setViewItem(null)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+              
+              {/* Image carousel */}
+              <div 
+                className="relative w-full h-64 bg-gray-100 rounded-lg overflow-hidden mb-6 flex items-center justify-center"
+                onTouchStart={(e) => (touchStartX.current = e.touches[0].clientX)}
+                onTouchEnd={(e) => {
+                  touchEndX.current = e.changedTouches[0].clientX;
+                  const diff = touchStartX.current - touchEndX.current;
+                  if (Math.abs(diff) > 50) {
+                    if (diff > 0) {
+                      setImageIndex((i) => (i + 1) % (viewItem.images?.length || 1));
+                    } else {
+                      setImageIndex((i) => (i - 1 + (viewItem.images?.length || 1)) % (viewItem.images?.length || 1));
+                    }
+                  }
+                }}
+              >
+                {viewItem.images?.length ? (
+                  <>
+                    <img
+                      src={viewItem.images[imageIndex]}
+                      alt={viewItem.title}
+                      className="object-contain w-full h-full"
+                    />
+                    {viewItem.images.length > 1 && (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setImageIndex((i) => (i - 1 + viewItem.images.length) % viewItem.images.length);
+                          }}
+                          className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white rounded-full p-1 transition-colors"
+                        >
+                          <ChevronLeft size={20} />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setImageIndex((i) => (i + 1) % viewItem.images.length);
+                          }}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white rounded-full p-1 transition-colors"
+                        >
+                          <ChevronRight size={20} />
+                        </button>
+                        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
+                          {imageIndex + 1} / {viewItem.images.length}
+                        </div>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-gray-400">No Image</span>
+                )}
+              </div>
+              
+              {/* Description */}
+              <p className="text-gray-700 mb-6">
+                {viewItem.description || "No description provided."}
+              </p>
+              
+              {/* ✅ DELIVERABLE D: Premium Timeline */}
+              {viewItem.type === "premium" && (
+                <div className="mb-6">
+                  <PremiumTimeline 
+                    currentStatus={viewItem.premiumStatus} 
+                    isBuyer={isPremiumBuyerMemo(viewItem)}
+                  />
+                </div>
+              )}
+              
+              {/* Details grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-sm text-gray-500 font-medium">Price</div>
+                    <div className={`text-2xl font-bold ${
+                      viewItem.type === "premium" 
+                        ? "text-indigo-600" 
+                        : "text-emerald-600"
+                    }`}>
+                      {viewItem.type === "premium" 
+                        ? `¥${viewItem.price?.toLocaleString() || "0"}` 
+                        : "FREE"}
+                    </div>
+                  </div>
+                  
+                  {viewItem.category && (
+                    <div>
+                      <div className="text-sm text-gray-500 font-medium">Category</div>
+                      <div className="text-gray-900">{viewItem.category}</div>
+                    </div>
+                  )}
+                  
+                  {viewItem.size && (
+                    <div>
+                      <div className="text-sm text-gray-500 font-medium">Size</div>
+                      <div className="text-gray-900 capitalize">{viewItem.size}</div>
+                    </div>
+                  )}
+                </div>
+                
+                {/* ✅ DELIVERABLE E: Delivery estimate */}
+                {viewItem.estimatedDelivery && (
+                  <div className="bg-indigo-50 text-indigo-700 p-4 rounded-lg">
+                    <div className="text-sm font-medium mb-1">Estimated Delivery</div>
+                    <div className="font-semibold">
+                      ¥{viewItem.estimatedDelivery.min?.toLocaleString() || "0"}–¥
+                      {viewItem.estimatedDelivery.max?.toLocaleString() || "0"}
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Status badges */}
+              <div className="flex flex-wrap gap-2 mb-6">
+                {isSponsoredItemMemo(viewItem) && (
+                  <span className="bg-gradient-to-r from-purple-600 to-blue-600 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+                    <Crown size={12} />
+                    Sponsored
+                  </span>
+                )}
+                
+                {viewItem.verified && (
+                  <span className="bg-green-600 text-white text-xs px-2 py-1 rounded">
+                    ✅ Verified
+                  </span>
+                )}
+                
+                {isPremiumBuyerMemo(viewItem) && (
+                  <span className="bg-indigo-600 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+                    <User size={12} />
+                    Your Purchase
+                  </span>
+                )}
+              </div>
+              
+              {/* Action buttons */}
+              {viewItem.type === "premium" ? (
+                <>
+                  {/* ✅ DELIVERABLE D & F: Premium Actions */}
+                  {isCurrentUserOwnerMemo(viewItem) ? (
+                    <PremiumSellerActions
+                      item={viewItem}
+                      updateFn={updatePremiumStatus}
+                      onSuccess={(newStatus) => {
+                        handlePremiumAction(newStatus);
+                        refreshItemData();
+                      }}
+                    />
+                  ) : (
+                    <PremiumBuyerActions
+                      item={viewItem}
+                      updateFn={updatePremiumStatus}
+                      onSuccess={(newStatus) => {
+                        handlePremiumAction(newStatus);
+                        refreshItemData();
+                      }}
+                      depositButton={
+                        isPremiumAvailableMemo(viewItem) && (
+                          <ItemDepositButton
+                            itemId={viewItem.id}
+                            title={viewItem.title}
+                            amountJPY={viewItem.price}
+                            onSuccess={() => {
+                              handlePremiumAction("depositPaid");
+                              refreshItemData();
+                            }}
+                          />
+                        )
+                      }
+                    />
                   )}
                 </>
               ) : (
-                <span className="text-gray-400 text-sm">No Image</span>
-              )}
-            </div>
-
-            {/* TITLE + DESC */}
-            <h2 className="text-lg font-semibold mb-1">{viewItem.title}</h2>
-            <p className="text-sm text-gray-600 mb-3">
-              {viewItem.description || "No description"}
-            </p>
-
-            {/* ✅ FIX 13: Complete Premium Timeline */}
-            {viewItem.type === "premium" && (
-              <PremiumTimeline 
-                currentStatus={viewItem.premiumStatus} 
-                isBuyer={isPremiumBuyer(viewItem)}
-              />
-            )}
-
-            {/* DELIVERY ESTIMATE */}
-            {viewItem.estimatedDelivery && (
-              <div className="bg-indigo-50 text-indigo-700 text-sm px-3 py-2 rounded-lg mb-3 flex items-center justify-between">
-                <span className="font-medium">Estimated Delivery Range:</span>
-                <span className="font-semibold">
-                  ¥{viewItem.estimatedDelivery.min?.toLocaleString()}–¥
-                  {viewItem.estimatedDelivery.max?.toLocaleString()}
-                </span>
-              </div>
-            )}
-
-            {viewItem.size && (
-              <p className="text-xs text-gray-500 mb-4">
-                📦 Item Size:{" "}
-                <b className="capitalize">{viewItem.size}</b>
-              </p>
-            )}
-
-            {/* ✅ FIX 15: Status Badges */}
-            <div className="flex flex-wrap justify-center gap-2 mb-3">
-              {isSponsoredItem(viewItem) && (
-                <span className="bg-gradient-to-r from-purple-600 to-blue-600 text-white text-xs px-2 py-0.5 rounded flex items-center gap-1">
-                  <Crown size={12} />
-                  Sponsored
-                </span>
-              )}
-
-              {viewItem.status === "relisted" && (
-                <span className="bg-gradient-to-r from-green-600 to-emerald-600 text-white text-xs px-2 py-0.5 rounded">
-                  🔄 Relisted
-                </span>
-              )}
-
-              {viewItem.verified && (
-                <span className="bg-green-600 text-white text-xs px-2 py-0.5 rounded">
-                  ✅ Verified
-                </span>
-              )}
-
-              <span
-                className={`text-xs px-2 py-0.5 rounded ${
-                  viewItem.type === "premium"
-                    ? "bg-indigo-600 text-white"
-                    : "bg-emerald-600 text-white"
-                }`}
-              >
-                {viewItem.type === "premium" ? "Premium" : "Free"}
-              </span>
-
-              {isCurrentUserOwner(viewItem) && (
-                <span className="bg-yellow-500 text-white text-xs px-2 py-0.5 rounded">
-                  🏷️ Your Listing
-                </span>
-              )}
-
-              {/* ✅ FIX 15: Premium Buyer Badge */}
-              {isPremiumBuyer(viewItem) && (
-                <span className="bg-indigo-600 text-white text-xs px-2 py-0.5 rounded flex items-center gap-1">
-                  <User size={12} />
-                  Your Purchase
-                </span>
-              )}
-
-              {/* ✅ FIX 15: Premium Status Badge */}
-              {viewItem.type === "premium" && (
-                <span
-                  className={`text-xs px-2 py-0.5 rounded ${
-                    getPremiumStatusConfig(viewItem).badgeColor
+                /* ✅ DELIVERABLE A: Free Request Button */
+                <button
+                  onClick={() => handleRequest(viewItem)}
+                  disabled={
+                    submitting ||
+                    !isFreeRequestable(viewItem) ||
+                    isFreeItemClosed(viewItem) ||
+                    isCurrentUserOwnerMemo(viewItem)
+                  }
+                  className={`w-full py-3 px-4 rounded-lg font-medium transition-colors ${
+                    submitting
+                      ? "bg-gray-300 text-gray-600 cursor-wait"
+                      : !isFreeRequestable(viewItem) 
+                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : isFreeItemClosed(viewItem)
+                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : isCurrentUserOwnerMemo(viewItem)
+                      ? "bg-yellow-100 text-yellow-800 cursor-not-allowed"
+                      : "bg-indigo-600 hover:bg-indigo-700 text-white"
                   }`}
                 >
-                  {getPremiumStatusConfig(viewItem).label}
-                </span>
+                  {submitting
+                    ? "Submitting..."
+                    : !isFreeRequestable(viewItem)
+                    ? "Unavailable"
+                    : isFreeItemClosed(viewItem)
+                    ? "⏰ Closed"
+                    : isCurrentUserOwnerMemo(viewItem)
+                    ? "Your Item"
+                    : "Request Now"}
+                </button>
               )}
             </div>
-
-            {/* ✅ FIX 15: Premium Actions */}
-            {viewItem.type === "premium" ? (
-              <>
-                {/* PRICE */}
-                <p className="text-2xl font-semibold text-indigo-600 mb-3">
-                  ¥{viewItem.price?.toLocaleString() || "—"}
-                </p>
-
-                {/* ✅ FIX 15: Owner Actions */}
-                {isCurrentUserOwner(viewItem) && (
-                  <PremiumSellerActions
-                    item={viewItem}
-                    updateFn={updatePremiumStatus}
-                    onSuccess={(newStatus) => {
-                      handlePremiumAction(newStatus, "Status updated successfully!");
-                      setTimeout(() => refreshItemData(), 500);
-                    }}
-                  />
-                )}
-
-                {/* ✅ FIX 15: Buyer Actions */}
-                {!isCurrentUserOwner(viewItem) && (
-                  <PremiumBuyerActions
-                    item={viewItem}
-                    updateFn={updatePremiumStatus}
-                    onSuccess={(newStatus) => {
-                      handlePremiumAction(newStatus, "Action completed successfully!");
-                      setTimeout(() => refreshItemData(), 500);
-                    }}
-                    depositButton={
-                      isPremiumAvailable(viewItem) ? (
-                        <ItemDepositButton
-                          itemId={viewItem.id}
-                          title={viewItem.title}
-                          amountJPY={viewItem.price}
-                          onSuccess={() => {
-                            handlePremiumAction("depositPaid", "Deposit paid successfully!");
-                            setTimeout(() => refreshItemData(), 1000);
-                          }}
-                        />
-                      ) : null
-                    }
-                  />
-                )}
-              </>
-            ) : (
-              /* ✅ FIX 8: Free Request Button with correct states */
-              <button
-                onClick={() => handleRequest(viewItem)}
-                disabled={
-                  submitting ||
-                  !isFreeRequestable(viewItem) ||
-                  isFreeItemClosed(viewItem) ||
-                  isCurrentUserOwner(viewItem)
-                }
-                className={`px-6 py-3 rounded-lg font-medium w-full transition-colors ${
-                  submitting
-                    ? "bg-gray-300 text-gray-600 cursor-wait"
-                    : !isFreeRequestable(viewItem) 
-                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                    : isFreeItemClosed(viewItem)
-                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                    : isCurrentUserOwner(viewItem)
-                    ? "bg-yellow-100 text-yellow-800 cursor-not-allowed"
-                    : "bg-indigo-600 hover:bg-indigo-700 text-white"
-                }`}
-              >
-                {submitting
-                  ? "Submitting…"
-                  : !isFreeRequestable(viewItem)
-                  ? "Unavailable"
-                  : isFreeItemClosed(viewItem)
-                  ? "⏰ Closed"
-                  : isCurrentUserOwner(viewItem)
-                  ? "Your Item"
-                  : "Request Now"}
-              </button>
-            )}
           </div>
         </div>
       )}
 
-      {/* ✅ FIX 7 & 15: Subscription Modal */}
+      {/* Subscription Modal */}
       <SubscriptionModal
         open={showSubscriptionModal}
         onClose={() => setShowSubscriptionModal(false)}

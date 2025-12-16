@@ -1,5 +1,5 @@
 // =============================================================
-// ItemDepositButton.jsx (FINAL v10 — ZipCloud + Save Profile)
+// ItemDepositButton.jsx (PATCHED v11 — Match parent component props)
 // =============================================================
 
 import React, { useState, useEffect } from "react";
@@ -38,14 +38,15 @@ function normalizeClientDelivery(raw) {
 }
 
 /* ---------------------------------------------------------
- *  MAIN COMPONENT
+ *  MAIN COMPONENT - UPDATED PROPS TO MATCH PARENT
  * --------------------------------------------------------- */
 export default function ItemDepositButton({
   itemId,
-  itemTitle,
-  itemPriceJPY,
+  title,           // CHANGED: Parent sends 'title' not 'itemTitle'
+  amountJPY,       // CHANGED: Parent sends 'amountJPY' not 'itemPriceJPY'
   addressInfo,
   userProfile,
+  onSuccess,       // NEW: Parent sends onSuccess callback
 }) {
   const { currentUser } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -121,6 +122,17 @@ export default function ItemDepositButton({
       toast.error("Missing item ID");
       return;
     }
+    
+    // Use the props as they come from parent (title, amountJPY)
+    if (!title || title.trim() === "") {
+      toast.error("Item title is missing. Please refresh the page.");
+      return;
+    }
+    
+    if (!amountJPY || amountJPY <= 0) {
+      toast.error("Item price is invalid. Please refresh the page.");
+      return;
+    }
 
     const finalDelivery = normalizeClientDelivery(
       deliveryData || addressInfo || userProfile?.defaultAddress
@@ -183,9 +195,9 @@ export default function ItemDepositButton({
       // Upload proof
       let receiptUrl = await uploadReceiptIfNeeded();
 
-      // Safe fields
-      const safeItemTitle = itemTitle || null;
-      const safeItemPrice = itemPriceJPY ?? null;
+      // Use props as they come from parent
+      const safeItemTitle = title || null;          // CHANGED: Use 'title' not 'itemTitle'
+      const safeItemPrice = amountJPY ?? null;      // CHANGED: Use 'amountJPY' not 'itemPriceJPY'
 
       /* ------------------------------
        * 1) Create main payment record
@@ -240,6 +252,12 @@ export default function ItemDepositButton({
       }
 
       toast.success("Deposit submitted successfully!");
+      
+      // Call onSuccess callback if provided by parent
+      if (onSuccess) {
+        onSuccess();
+      }
+      
     } catch (err) {
       console.error("Deposit submit error:", err);
       toast.error(err.message || "Submission failed.");
@@ -249,7 +267,7 @@ export default function ItemDepositButton({
   };
 
   /* ---------------------------------------------------------
-   * UI COMPONENT
+   * UI COMPONENT - Updated to use correct prop names
    * --------------------------------------------------------- */
   return (
     <div className="w-full space-y-4">
@@ -261,8 +279,8 @@ export default function ItemDepositButton({
           className={`flex-1 p-3 rounded-xl border-2 text-center font-semibold transition
             ${
               method === "bank_transfer"
-                ? "bg-green-600 text-white border-green-700"
-                : "bg-gray-300 text-black border-gray-500"
+                ? "bg-indigo-600 text-white border-indigo-700"
+                : "bg-gray-100 text-gray-800 border-gray-300"
             }`}
         >
           Bank Transfer
@@ -273,8 +291,8 @@ export default function ItemDepositButton({
           className={`flex-1 p-3 rounded-xl border-2 text-center font-semibold transition
             ${
               method === "cash_on_delivery"
-                ? "bg-green-600 text-white border-green-700"
-                : "bg-gray-300 text-black border-gray-500"
+                ? "bg-indigo-600 text-white border-indigo-700"
+                : "bg-gray-100 text-gray-800 border-gray-300"
             }`}
         >
           Cash on Delivery
@@ -283,13 +301,13 @@ export default function ItemDepositButton({
 
       {/* BANK TRANSFER RECEIPT */}
       {method === "bank_transfer" && (
-        <div>
-          <label className="font-medium">Upload Receipt</label>
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-200">
+          <label className="font-medium text-gray-800">Upload Receipt</label>
           <input
             type="file"
             accept="image/*"
             onChange={(e) => setReceiptFile(e.target.files[0])}
-            className="w-full p-2 border rounded-lg mt-1"
+            className="w-full p-3 border border-gray-300 rounded-lg mt-2 bg-gray-50 text-gray-900"
           />
         </div>
       )}
@@ -299,22 +317,22 @@ export default function ItemDepositButton({
         <div className="space-y-4">
 
           {/* ZIP */}
-          <div>
-            <label className="font-medium">ZIP Code</label>
-            <div className="flex gap-2 mt-1">
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-200">
+            <label className="font-medium text-gray-800">ZIP Code</label>
+            <div className="flex gap-2 mt-2">
               <input
                 type="text"
                 value={deliveryData.zipCode || ""}
                 onChange={(e) =>
                   setDeliveryData({ ...deliveryData, zipCode: e.target.value })
                 }
-                className="flex-1 p-2 border rounded-lg"
+                className="flex-1 p-3 border border-gray-300 rounded-lg bg-gray-50 text-gray-900"
                 placeholder="1234567"
                 maxLength={7}
               />
               <button
                 onClick={handleZipLookup}
-                className="px-3 py-2 bg-green-600 text-white rounded-lg"
+                className="px-4 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition"
               >
                 Autofill
               </button>
@@ -322,47 +340,54 @@ export default function ItemDepositButton({
           </div>
 
           {/* ADDRESS */}
-          <div>
-            <label className="font-medium">Address</label>
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-200">
+            <label className="font-medium text-gray-800">Address</label>
             <input
               type="text"
               value={deliveryData.address || ""}
               onChange={(e) =>
                 setDeliveryData({ ...deliveryData, address: e.target.value })
               }
-              className="w-full p-2 border rounded-lg mt-1"
+              className="w-full p-3 border border-gray-300 rounded-lg mt-2 bg-gray-50 text-gray-900"
               placeholder="Full delivery address"
             />
           </div>
 
           {/* PHONE */}
-          <div>
-            <label className="font-medium">Phone Number</label>
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-200">
+            <label className="font-medium text-gray-800">Phone Number</label>
             <input
               type="text"
               value={deliveryData.phone || ""}
               onChange={(e) =>
                 setDeliveryData({ ...deliveryData, phone: e.target.value })
               }
-              className="w-full p-2 border rounded-lg mt-1"
+              className="w-full p-3 border border-gray-300 rounded-lg mt-2 bg-gray-50 text-gray-900"
               placeholder="Phone number"
             />
           </div>
 
           {/* SAVE TO PROFILE TOGGLE */}
-          <div className="flex items-center justify-between pt-2">
-            <span className="font-medium">Save to profile</span>
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="font-medium text-gray-800">Save as default address</span>
+                <p className="text-sm text-gray-600 mt-1">
+                  Use this address automatically for future deliveries
+                </p>
+              </div>
 
-            <label className="relative inline-block w-12 h-6 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={saveToProfile}
-                onChange={() => setSaveToProfile(!saveToProfile)}
-                className="peer sr-only"
-              />
-              <span className="absolute inset-0 bg-gray-300 rounded-full peer-checked:bg-green-600 transition"></span>
-              <span className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition peer-checked:translate-x-6"></span>
-            </label>
+              <label className="relative inline-block w-12 h-6 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={saveToProfile}
+                  onChange={() => setSaveToProfile(!saveToProfile)}
+                  className="peer sr-only"
+                />
+                <span className="absolute inset-0 bg-gray-300 rounded-full peer-checked:bg-indigo-600 transition"></span>
+                <span className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition peer-checked:translate-x-6"></span>
+              </label>
+            </div>
           </div>
         </div>
       )}
@@ -371,60 +396,94 @@ export default function ItemDepositButton({
       <button
         disabled={loading}
         onClick={validateBeforeConfirm}
-        className="w-full py-3 bg-green-600 text-white rounded-xl font-semibold"
+        className="w-full py-4 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 transition"
       >
         {loading ? "Processing..." : "Submit Deposit"}
       </button>
 
       {/* ---------------------------------------------------------
-       * CONFIRMATION MODAL
+       * CONFIRMATION MODAL - Updated to use correct prop names
        * --------------------------------------------------------- */}
       {showConfirm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-2xl w-[90%] max-w-md space-y-4 shadow-xl">
+          <div className="bg-white p-6 rounded-2xl w-[90%] max-w-md space-y-6 shadow-xl">
 
-            <h2 className="text-lg font-bold text-center">
+            <h2 className="text-xl font-bold text-center text-gray-900">
               Confirm Your Deposit
             </h2>
 
-            <div className="space-y-1 text-sm">
-              <p><strong>Item:</strong> {itemTitle}</p>
-              <p><strong>Amount:</strong> ¥{itemPriceJPY?.toLocaleString()}</p>
-              <p><strong>Method:</strong> {method === "cash_on_delivery" ? "Cash on Delivery" : "Bank Transfer"}</p>
+            {/* ITEM DETAILS - Using props from parent */}
+            <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="font-medium text-gray-800">Item:</span>
+                <span className="font-semibold text-gray-900 text-right max-w-[60%] break-words">
+                  {title || "Unknown Item"}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="font-medium text-gray-800">Amount:</span>
+                <span className="font-bold text-indigo-700">
+                  ¥{(amountJPY || 0).toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="font-medium text-gray-800">Payment Method:</span>
+                <span className="font-medium text-gray-900">
+                  {method === "cash_on_delivery" ? "Cash on Delivery" : "Bank Transfer"}
+                </span>
+              </div>
             </div>
 
+            {/* DELIVERY ADDRESS DETAILS (only for COD) */}
             {method === "cash_on_delivery" && (
-              <div className="text-sm space-y-1">
-                <p><strong>ZIP:</strong> {deliveryData.zipCode}</p>
-                <p><strong>Address:</strong> {deliveryData.address}</p>
-                <p><strong>Phone:</strong> {deliveryData.phone}</p>
+              <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+                <h3 className="font-semibold text-gray-900 border-b pb-2">Delivery Address</h3>
+                <div className="flex justify-between items-start">
+                  <span className="font-medium text-gray-800">ZIP Code:</span>
+                  <span className="text-gray-900">{deliveryData.zipCode || "Not provided"}</span>
+                </div>
+                <div className="flex justify-between items-start">
+                  <span className="font-medium text-gray-800">Address:</span>
+                  <span className="text-gray-900 text-right max-w-[60%]">{deliveryData.address || "Not provided"}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="font-medium text-gray-800">Phone:</span>
+                  <span className="text-gray-900">{deliveryData.phone || "Not provided"}</span>
+                </div>
               </div>
             )}
 
+            {/* RECEIPT PREVIEW (only for bank transfer) */}
             {method === "bank_transfer" && receiptFile && (
-              <div>
-                <strong>Receipt Preview:</strong>
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h3 className="font-semibold text-gray-900 mb-2">Receipt Preview</h3>
                 <img
                   src={URL.createObjectURL(receiptFile)}
-                  className="w-full mt-2 rounded-lg border"
+                  className="w-full rounded-lg border border-gray-300"
+                  alt="Receipt preview"
                 />
               </div>
             )}
 
-            {/* ACTION BUTTONS (same UI as toggle buttons) */}
+            {/* ACTION BUTTONS */}
             <div className="flex gap-3 pt-2">
               <button
                 onClick={() => setShowConfirm(false)}
-                className="flex-1 p-3 rounded-xl border-2 bg-gray-300 text-black border-gray-500 font-semibold"
+                className="flex-1 p-3 rounded-xl border-2 bg-gray-100 text-gray-800 border-gray-300 font-semibold hover:bg-gray-200 transition"
               >
                 Cancel
               </button>
 
               <button
                 onClick={submitDeposit}
-                className="flex-1 p-3 rounded-xl border-2 bg-green-600 text-white border-green-700 font-semibold"
+                disabled={!itemId || !title || !amountJPY}
+                className={`flex-1 p-3 rounded-xl border-2 font-semibold transition
+                  ${!itemId || !title || !amountJPY
+                    ? "bg-gray-300 text-gray-500 border-gray-400 cursor-not-allowed"
+                    : "bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700"
+                  }`}
               >
-                Confirm
+                {!itemId || !title || !amountJPY ? "Missing Item Info" : "Confirm"}
               </button>
             </div>
 

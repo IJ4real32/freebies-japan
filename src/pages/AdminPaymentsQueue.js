@@ -1,5 +1,5 @@
-// ✅ FILE: src/pages/AdminPaymentsQueue.js (PHASE-2 — FIXED & SAFE)
-// Eliminated async cleanup bug, stable Firestore listener.
+// ✅ FILE: src/pages/AdminPaymentsQueue.js (PHASE-2 — FINAL REGEN)
+// Fully patched: unified amount resolver, correct sorting, stable listener.
 
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useNavigate, Link } from "react-router-dom";
@@ -27,9 +27,9 @@ import { db } from "../firebase";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 
 
-// --------------------------------------------------------------
-// PHASE-2 STATUS FILTERS (matches new payments collection)
-// --------------------------------------------------------------
+// =============================================================
+// PAYMENT STATUS FILTERS (PHASE 2)
+// =============================================================
 const STATUS_FILTERS = [
   { key: "all", label: "All" },
   { key: "pending", label: "Pending Review" },
@@ -41,6 +41,68 @@ const STATUS_FILTERS = [
 ];
 
 
+// =============================================================
+// Helpers
+// =============================================================
+const formatAmount = (amount, currency = "JPY") => {
+  try {
+    return new Intl.NumberFormat("ja-JP", { style: "currency", currency }).format(amount ?? 0);
+  } catch {
+    return `${amount ?? 0} ${currency}`;
+  }
+};
+
+// Unified amount resolver (Phase-2 standard)
+const getEffectiveAmount = (p) => {
+  return p.amount && p.amount > 0
+    ? p.amount
+    : p.itemPriceJPY || p.amountJPY || 0;
+};
+
+const formatDate = (v) => {
+  if (!v) return "—";
+  const d = v?.seconds ? new Date(v.seconds * 1000) : new Date(v);
+  return isNaN(d.getTime()) ? "—" : d.toLocaleString("ja-JP");
+};
+
+const formatTimeAgo = (v) => {
+  if (!v) return "—";
+  const d = v?.seconds ? new Date(v.seconds * 1000) : new Date(v);
+  const diff = Date.now() - d;
+  const mins = Math.floor(diff / 60000);
+
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+};
+
+const badge = (status) => {
+  switch (status) {
+    case "pending":
+    case "pending_cod_confirmation":
+      return "bg-yellow-100 text-yellow-800";
+    case "reported":
+      return "bg-blue-100 text-blue-800";
+    case "confirmed":
+      return "bg-green-100 text-green-800";
+    case "delivered":
+      return "bg-emerald-100 text-emerald-800";
+    case "rejected":
+      return "bg-red-100 text-red-800";
+    default:
+      return "bg-gray-200 text-gray-800";
+  }
+};
+
+
+// =============================================================
+// Component
+// =============================================================
 export default function AdminPaymentsQueue() {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -52,9 +114,7 @@ export default function AdminPaymentsQueue() {
   const navigate = useNavigate();
   const aliveRef = useRef(true);
 
-  // --------------------------------------------------------------
-  // Mark alive/unmounted — prevents updates after unmount
-  // --------------------------------------------------------------
+  // Track component mounted state safely
   useEffect(() => {
     aliveRef.current = true;
     return () => {
@@ -63,19 +123,18 @@ export default function AdminPaymentsQueue() {
   }, []);
 
 
-  // --------------------------------------------------------------
-  // 🚀 REAL-TIME FIRESTORE LISTENER — SAFE VERSION
-  // --------------------------------------------------------------
+  // =============================================================
+  // LIVE FIRESTORE LISTENER (SAFE)
+  // =============================================================
   useEffect(() => {
     let unsubscribe = () => {};
 
-    const start = async () => {
+    const init = async () => {
       const ok = await checkAdminStatus();
       if (!ok) return navigate("/unauthorized");
 
       const q = query(collection(db, "payments"), orderBy("createdAt", "desc"));
 
-      // REAL Firestore unsubscribe function
       unsubscribe = onSnapshot(
         q,
         (snap) => {
@@ -92,76 +151,29 @@ export default function AdminPaymentsQueue() {
         },
         (err) => {
           console.error("Payments listener error:", err);
-          toast.error("Failed to load payments.");
+          toast.error("Failed to load payments");
           setLoading(false);
         }
       );
     };
 
-    start(); // NO return here — async allowed, cleanup below synchronously.
+    init();
 
     return () => {
-      if (unsubscribe) unsubscribe();
+      unsubscribe && unsubscribe();
     };
   }, [navigate]);
 
 
-  // --------------------------------------------------------------
-  // Helpers
-  // --------------------------------------------------------------
-  const formatAmount = (amount, currency = "JPY") => {
-    try {
-      return new Intl.NumberFormat("ja-JP", { style: "currency", currency }).format(amount ?? 0);
-    } catch {
-      return `${amount ?? 0} ${currency}`;
-    }
-  };
-
-  const formatDate = (v) => {
-    if (!v) return "—";
-    const d = v?.seconds ? new Date(v.seconds * 1000) : new Date(v);
-    return isNaN(d.getTime()) ? "—" : d.toLocaleString("ja-JP");
-  };
-
-  const formatTimeAgo = (v) => {
-    if (!v) return "—";
-    const d = v?.seconds ? new Date(v.seconds * 1000) : new Date(v);
-    const diff = Date.now() - d;
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return "Just now";
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    const days = Math.floor(hrs / 24);
-    return `${days}d ago`;
-  };
-
-  const badge = (status) => {
-    switch (status) {
-      case "pending":
-      case "pending_cod_confirmation":
-        return "bg-yellow-100 text-yellow-800";
-      case "reported":
-        return "bg-blue-100 text-blue-800";
-      case "confirmed":
-        return "bg-green-100 text-green-800";
-      case "delivered":
-        return "bg-emerald-100 text-emerald-800";
-      case "rejected":
-        return "bg-red-100 text-red-800";
-      default:
-        return "bg-gray-100 text-gray-800";
-    }
-  };
-
-
-  // --------------------------------------------------------------
-  // Filters + Search + Sorting
-  // --------------------------------------------------------------
+  // =============================================================
+  // FILTERS + SEARCH + SORTING
+  // =============================================================
   const filteredPayments = useMemo(() => {
     let list = payments;
 
-    if (statusKey !== "all") list = list.filter((p) => p.status === statusKey);
+    if (statusKey !== "all") {
+      list = list.filter((p) => p.status === statusKey);
+    }
 
     if (search.trim()) {
       const s = search.toLowerCase();
@@ -174,18 +186,18 @@ export default function AdminPaymentsQueue() {
     }
 
     if (sort.field) {
-      list = [...list].sort((a, b) => {
-        const dir = sort.direction === "asc" ? 1 : -1;
+      const dir = sort.direction === "asc" ? 1 : -1;
 
+      list = [...list].sort((a, b) => {
         if (sort.field === "amount") {
-          const A = a.amount ?? a.amountJPY ?? 0;
-          const B = b.amount ?? b.amountJPY ?? 0;
+          const A = getEffectiveAmount(a);
+          const B = getEffectiveAmount(b);
           return (A - B) * dir;
         }
 
         if (sort.field === "createdAt") {
-          const A = new Date(a.createdAt?.seconds * 1000 || 0);
-          const B = new Date(b.createdAt?.seconds * 1000 || 0);
+          const A = a.createdAt?.seconds || 0;
+          const B = b.createdAt?.seconds || 0;
           return (A - B) * dir;
         }
 
@@ -206,7 +218,9 @@ export default function AdminPaymentsQueue() {
   };
 
   const sortIcon = (field) => {
-    if (sort.field !== field) return <ArrowUpDown size={14} className="inline text-gray-400" />;
+    if (sort.field !== field)
+      return <ArrowUpDown size={14} className="inline text-gray-400" />;
+
     return sort.direction === "asc" ? (
       <ArrowUp size={14} className="inline text-blue-600" />
     ) : (
@@ -215,16 +229,14 @@ export default function AdminPaymentsQueue() {
   };
 
 
-  // --------------------------------------------------------------
+  // =============================================================
   // UI
-  // --------------------------------------------------------------
+  // =============================================================
   return (
     <div className="flex min-h-screen bg-gray-100 text-gray-800">
 
       {/* SIDEBAR */}
-      <aside
-        className={`${sidebarOpen ? "w-64" : "w-0"} bg-gradient-to-b from-indigo-900 via-blue-900 to-purple-900 text-white transition-all duration-300 overflow-hidden`}
-      >
+      <aside className={`${sidebarOpen ? "w-64" : "w-0"} bg-gradient-to-b from-indigo-900 via-blue-900 to-purple-900 text-white transition-all duration-300 overflow-hidden`}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/20">
           <h2 className="text-lg font-bold">Admin Panel</h2>
           <button onClick={() => setSidebarOpen(false)}>
@@ -233,27 +245,13 @@ export default function AdminPaymentsQueue() {
         </div>
 
         <nav className="p-4 space-y-3 text-sm">
-          <Link to="/admin" className="block px-3 py-2 rounded hover:bg-white/10">
-            🏠 Dashboard
-          </Link>
-          <Link to="/admin/requests" className="block px-3 py-2 rounded hover:bg-white/10">
-            📋 Requests
-          </Link>
-          <Link to="/admin/items" className="block px-3 py-2 rounded hover:bg-white/10">
-            🎁 Items
-          </Link>
-          <Link to="/admin/payments" className="block px-3 py-2 rounded bg-white/20">
-            💰 Payments
-          </Link>
-          <Link to="/admin/money-donations" className="block px-3 py-2 rounded hover:bg-white/10">
-            ❤️ Money Donations
-          </Link>
-          <Link to="/admin/pickups" className="block px-3 py-2 rounded hover:bg-white/10">
-            🚚 Pickups
-          </Link>
-          <Link to="/admin/users" className="block px-3 py-2 rounded hover:bg-white/10">
-            👥 Users
-          </Link>
+          <Link to="/admin" className="block px-3 py-2 rounded hover:bg-white/10">🏠 Dashboard</Link>
+          <Link to="/admin/requests" className="block px-3 py-2 rounded hover:bg-white/10">📋 Requests</Link>
+          <Link to="/admin/items" className="block px-3 py-2 rounded hover:bg-white/10">🎁 Items</Link>
+          <Link to="/admin/payments" className="block px-3 py-2 rounded bg-white/20">💰 Payments</Link>
+          <Link to="/admin/money-donations" className="block px-3 py-2 rounded hover:bg-white/10">❤️ Money Donations</Link>
+          <Link to="/admin/pickups" className="block px-3 py-2 rounded hover:bg-white/10">🚚 Pickups</Link>
+          <Link to="/admin/users" className="block px-3 py-2 rounded hover:bg-white/10">👥 Users</Link>
         </nav>
       </aside>
 
@@ -263,10 +261,7 @@ export default function AdminPaymentsQueue() {
         {/* HEADER */}
         <header className="flex items-center justify-between bg-white shadow px-6 py-4 border-b sticky top-0 z-40">
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="md:hidden text-gray-600"
-            >
+            <button onClick={() => setSidebarOpen(true)} className="md:hidden text-gray-600">
               <Menu size={20} />
             </button>
 
@@ -385,11 +380,13 @@ export default function AdminPaymentsQueue() {
                           </td>
 
                           <td className="px-4 py-3">
-                            {p.itemTitle || <span className="text-gray-400 italic">No item title</span>}
+                            {p.itemTitle || (
+                              <span className="text-gray-400 italic">No item title</span>
+                            )}
                           </td>
 
                           <td className="px-4 py-3 font-medium">
-                            {formatAmount(p.amount ?? p.amountJPY)}
+                            {formatAmount(getEffectiveAmount(p))}
                           </td>
 
                           <td className="px-4 py-3 text-xs text-gray-600">
@@ -399,9 +396,7 @@ export default function AdminPaymentsQueue() {
                           </td>
 
                           <td className="px-4 py-3">
-                            <span
-                              className={`px-2 py-1 text-xs rounded-full ${badge(p.status)}`}
-                            >
+                            <span className={`px-2 py-1 text-xs rounded-full ${badge(p.status)}`}>
                               {p.status}
                             </span>
                           </td>
@@ -432,6 +427,7 @@ export default function AdminPaymentsQueue() {
                         </tr>
                       ))}
                     </tbody>
+
                   </table>
                 </div>
               )}
@@ -439,6 +435,7 @@ export default function AdminPaymentsQueue() {
 
           </div>
         </section>
+
       </main>
     </div>
   );

@@ -1,652 +1,556 @@
-// ===============================================================
-// FILE: src/pages/MyActivity.jsx
-// FINAL — PHASE 2 STABLE BUILD (NULL-SAFE + UI + ACTIONS)
-// ===============================================================
+// ======================================================================
+// FILE: src/pages/MyActivity.js
+// PHASE-2 FINAL — Mobile-First + Correct Paths + Stable Hooks
+// COMPLETE PATCH: Batched Donations + Delivery Details + Seller Pickup + Dual Confirmation
+// ======================================================================
 
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import { useNavigate } from "react-router-dom";
-
+import { httpsCallable } from "firebase/functions";
 import {
+  doc,
+  updateDoc,
+  writeBatch,
+  serverTimestamp,
   collection,
-  query,
-  where,
-  orderBy,
-  onSnapshot,
   getDocs,
   getDoc,
-  doc,
-  writeBatch,
-  updateDoc,
-  serverTimestamp,
+  query,
+  where,
 } from "firebase/firestore";
 
 import { db, functions } from "../firebase";
-import { httpsCallable } from "firebase/functions";
-
 import { useAuth } from "../contexts/AuthContext";
 
+import useMyRequests from "../components/MyActivity/hooks/useMyRequests";
+import useMyPurchases from "../components/MyActivity/hooks/useMyPurchases";
+import useMyListings from "../components/MyActivity/hooks/useMyListings";
+
+// CARDS
 import RequestCard from "../components/MyActivity/RequestCard";
 import PurchaseCard from "../components/MyActivity/PurchaseCard";
-import DepositCard from "../components/MyActivity/DepositCard";
 import ListingCard from "../components/MyActivity/ListingCard";
 
-import DetailDrawer from "../components/MyActivity/DetailDrawer";
+// DRAWERS
+import DetailDrawerFree from "../components/MyActivity/drawer/DetailDrawerFree";
+import DetailDrawerPremium from "../components/MyActivity/drawer/DetailDrawerPremium";
+
+// MODALS
+import RelistModal from "../components/MyActivity/RelistModal";
 import PickupModal from "../components/MyActivity/PickupModal";
 import ConfirmActionModal from "../components/MyActivity/ConfirmActionModal";
 import DeclineReasonModal from "../components/MyActivity/DeclineReasonModal";
 import AddressConfirmationModal from "../components/MyActivity/AddressConfirmationModal";
-import RelistModal from "../components/MyActivity/RelistModal";
 
-import {
-  Loader2,
-  Gift,
-  CreditCard,
-  List,
-  ShoppingBag,
-  Plus,
-} from "lucide-react";
-
+import { Gift, ShoppingBag, List, Plus, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 
-/* -----------------------------------------------------------
-   NULL-SAFE FILTER
------------------------------------------------------------ */
-const filterVisible = (items) =>
-  items?.filter((i) => i && !i.softDeleted) || [];
+// ======================================================================
+// HELPERS
+// ======================================================================
 
-/* -----------------------------------------------------------
-   PREMIUM STATUS NORMALIZER
------------------------------------------------------------ */
-const normalizePremiumStatus = (status) => {
-  const allowed = [
-    "available",
-    "depositPaid",
-    "sellerAccepted",
-    "preparingDelivery",
-    "inTransit",
-    "delivered",
-    "sold",
-    "cancelled",
-    "buyerDeclined",
-    "rejected",
-    "completed",
-    "autoClosed",
-  ];
-  return allowed.includes(status) ? status : "available";
+const filterVisible = (arr) => arr?.filter((i) => i && !i.softDeleted) || [];
+
+// Split array into chunks of N (Firestore "in" limit = 10)
+const chunkArray = (arr, size = 10) => {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
 };
 
-/* -----------------------------------------------------------
-   MAIN COMPONENT
------------------------------------------------------------ */
+// ======================================================================
+// MEMOIZED COMPONENTS
+// ======================================================================
+
+const MemoTabBtn = memo(({ label, icon: Icon, active, count, onClick, disabled }) => (
+  <button
+    onClick={onClick}
+    disabled={disabled}
+    className={`flex flex-col items-center flex-1 py-3 border-b-2 transition-all duration-200 ${
+      active
+        ? "border-blue-600 text-blue-600"
+        : "border-transparent text-gray-500 hover:text-gray-700"
+    } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+  >
+    <Icon size={18} />
+    <span className="text-xs mt-1">{label}</span>
+    {count > 0 && (
+      <span className="absolute top-1 right-3 text-[10px] bg-gray-200 px-1.5 rounded-full">
+        {count}
+      </span>
+    )}
+  </button>
+));
+
+const MemoFAB = memo(({ navigate }) => (
+  <button
+    onClick={() => navigate("/donate")}
+    className="fixed bottom-24 right-6 bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-full flex items-center gap-2 shadow-lg transition-all duration-200 active:scale-95"
+  >
+    <Plus size={20} />
+    <span>List Item</span>
+  </button>
+));
+
+// ======================================================================
+// MAIN COMPONENT
+// ======================================================================
+
 export default function MyActivity() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
-  const hasLoaded = useRef(false);
+  const tabSwitchRef = useRef({ isSwitching: false, timeout: null });
 
+  // -------------------------------------
+  // TAB STATE
+  // -------------------------------------
   const [activeTab, setActiveTab] = useState(
     localStorage.getItem("myActivityActiveTab") || "requests"
   );
+  const [tabLoading, setTabLoading] = useState(false);
 
-  const [requests, setRequests] = useState([]);
-  const [purchases, setPurchases] = useState([]);
-  const [deposits, setDeposits] = useState([]);
-  const [listings, setListings] = useState([]);
+  useEffect(() => {
+    localStorage.setItem("myActivityActiveTab", activeTab);
+  }, [activeTab]);
 
-  const [drawer, setDrawer] = useState({
-    open: false,
-    item: null,
-    type: null,
-  });
+  // -------------------------------------
+  // HOOK DATA
+  // -------------------------------------
+  const requests = useMyRequests(currentUser?.uid);
+  const purchases = useMyPurchases(currentUser?.uid);
+  const listings = useMyListings(currentUser?.uid);
 
-  const [pickupModal, setPickupModal] = useState({
-    open: false,
-    donation: null,
-  });
+  // -------------------------------------
+  // DONATION JOIN STATE
+  // -------------------------------------
+  const [donationMap, setDonationMap] = useState({});
+  const [donationLoading, setDonationLoading] = useState(false);
 
+  // -------------------------------------
+  // DELIVERY DETAILS STATE
+  // -------------------------------------
+  const [deliveryDetailsMap, setDeliveryDetailsMap] = useState({});
+  const [loadingDeliveryDetails, setLoadingDeliveryDetails] = useState({});
+
+  // ======================================================================
+  // MODAL STATES
+  // ======================================================================
+
+  const [drawer, setDrawer] = useState({ open: false, type: null, item: null });
   const [confirmModal, setConfirmModal] = useState({
     open: false,
     item: null,
-    type: null,
     action: null,
-    message: null,
+    message: "",
   });
-
-  const [declineModal, setDeclineModal] = useState({
-    open: false,
-    item: null,
+  const [declineModal, setDeclineModal] = useState({ open: false, item: null });
+  const [addressModal, setAddressModal] = useState({ open: false, item: null });
+  const [pickupModal, setPickupModal] = useState({ 
+    open: false, 
+    donation: null,
+    mode: "free",
+    requestId: null 
   });
-
-  const [addressModal, setAddressModal] = useState({
-    open: false,
-    item: null,
-  });
-
-  const [relistModal, setRelistModal] = useState({
-    open: false,
-    item: null,
-  });
-
+  const [relistModal, setRelistModal] = useState({ open: false, item: null });
   const [loading, setLoading] = useState({
-    page: true,
     delete: null,
-    accept: null,
-    confirm: null,
-    schedule: null,
     premium: null,
+    decline: null,
+    address: null,
+    schedule: null,
     relist: null,
   });
 
-  /* -----------------------------------------------------------
-     INITIAL HYDRATION (FULL DATA LOAD)
-  ----------------------------------------------------------- */
-  const loadData = useCallback(async () => {
-    if (!currentUser || hasLoaded.current) return;
-    hasLoaded.current = true;
+  // ======================================================================
+  // MEMOIZED DERIVED DATA
+  // ======================================================================
 
-    try {
-      setLoading((s) => ({ ...s, page: true }));
-      const uid = currentUser.uid;
+  const rawReq = useMemo(() => filterVisible(requests), [requests]);
+  
+  const visReq = useMemo(() => 
+    rawReq.map((r) => ({
+      ...r,
+      donation: donationMap[r.itemId] || null,
+    })), 
+    [rawReq, donationMap]
+  );
 
-      // ------------------------------------
-      // 1) FREE REQUESTS
-      // ------------------------------------
-      const reqSnap = await getDocs(
-        query(
-          collection(db, "requests"),
-          where("userId", "==", uid),
-          orderBy("createdAt", "desc")
-        )
-      );
+  const visPur = useMemo(() => filterVisible(purchases), [purchases]);
+  const visList = useMemo(() => filterVisible(listings), [listings]);
 
-      const reqData = await Promise.all(
-        reqSnap.docs.map(async (d) => {
-          const r = d.data();
-          if (!r || r.softDeleted) return null;
+  // Enhanced listings with request info for FREE items
+  const listingsWithRequestInfo = useMemo(() => {
+    return visList.map((listing) => {
+      const deliveryDetails = listing.deliveryDetails || null;
 
-          let donation = null;
-          let delivery = null;
+      // ✅ Phase-2 correct: gate pickup on request lifecycle
+      const hasActiveRequest =
+        listing.requestStatus &&
+        ["awarded", "accepted"].includes(listing.requestStatus);
 
-          if (r.itemId) {
-            const ds = await getDoc(doc(db, "donations", r.itemId));
-            if (ds.exists()) donation = ds.data();
-          }
+      return {
+        ...listing,
+        deliveryDetails, // KEEP: seller visibility + future dual confirmation
+        hasActiveRequest,
+      };
+    });
+  }, [visList]);
 
-          const ddSnap = await getDocs(
-            query(
-              collection(db, "deliveryDetails"),
-              where("requestId", "==", d.id)
-            )
+  // ======================================================================
+  // PATCH 1: UPDATED DONATION PREFETCH EFFECT (BATCHED)
+  // ======================================================================
+
+  useEffect(() => {
+    if (!rawReq.length) return;
+
+    const loadDonations = async () => {
+      try {
+        setDonationLoading(true);
+        
+        const itemIds = [
+          ...new Set(rawReq.map((r) => r.itemId).filter(Boolean)),
+        ];
+
+        if (!itemIds.length) {
+          setDonationLoading(false);
+          return;
+        }
+
+        // Split into batches of 10 (Firestore "in" query limit)
+        const batches = chunkArray(itemIds, 10);
+        const mergedMap = {};
+
+        // Fetch donations in parallel batches
+        const batchPromises = batches.map(async (batch) => {
+          const q = query(
+            collection(db, "donations"),
+            where("__name__", "in", batch)
           );
 
-          if (!ddSnap.empty) delivery = ddSnap.docs[0].data();
+          const snap = await getDocs(q);
+          return snap;
+        });
 
-          return {
-            id: d.id,
-            ...r,
-            itemData: donation,
-            deliveryData: delivery,
-            status: delivery?.status || r.status,
-          };
-        })
-      );
+        // Wait for all batches to complete
+        const results = await Promise.all(batchPromises);
+        
+        // Merge all results
+        results.forEach((snap) => {
+          snap.forEach((doc) => {
+            mergedMap[doc.id] = doc.data();
+          });
+        });
 
-      setRequests(filterVisible(reqData));
+        setDonationMap(mergedMap);
+      } catch (err) {
+        console.error("Donation batch fetch failed", err);
+      } finally {
+        setDonationLoading(false);
+      }
+    };
 
-      // ------------------------------------
-      // 2) PREMIUM PURCHASES
-      // ------------------------------------
-      const purSnap = await getDocs(
-        query(
-          collection(db, "payments"),
-          where("userId", "==", uid),
-          where("type", "==", "item"),
-          orderBy("createdAt", "desc")
-        )
-      );
+    loadDonations();
+  }, [rawReq]);
 
-      const purData = await Promise.all(
-        purSnap.docs.map(async (d) => {
-          const p = d.data();
-          if (!p || p.softDeleted) return null;
+  // ======================================================================
+  // ACTION HANDLERS (DEFINED BEFORE ANY USE)
+  // ======================================================================
 
-          let donation = null;
-          if (p.targetId) {
-            const ds = await getDoc(doc(db, "donations", p.targetId));
-            if (ds.exists()) donation = ds.data();
-          }
+  // Tab switching
+  const handleTabSwitch = useCallback((tab) => {
+    if (tab === activeTab || tabSwitchRef.current.isSwitching) return;
 
-          return {
-            id: d.id,
-            ...p,
-            isPremium: true,
-            premiumStatus: normalizePremiumStatus(p.status),
-            donation,
-          };
-        })
-      );
-
-      setPurchases(filterVisible(purData));
-
-      // ------------------------------------
-      // 3) DEPOSITS
-      // ------------------------------------
-      const depSnap = await getDocs(
-        query(collection(db, "payments"), where("userId", "==", uid))
-      );
-
-      setDeposits(
-        depSnap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((i) => i && !i.softDeleted)
-      );
-
-      // ------------------------------------
-      // 4) USER LISTINGS
-      // ------------------------------------
-      const listSnap = await getDocs(
-        query(
-          collection(db, "donations"),
-          where("donorId", "==", uid),
-          where("donorType", "==", "user"),
-          orderBy("createdAt", "desc")
-        )
-      );
-
-      setListings(
-        listSnap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((i) => i && !i.softDeleted)
-      );
-    } catch (err) {
-      console.error(err);
-      toast.error("Could not load activity.");
+    if (tabSwitchRef.current.timeout) {
+      clearTimeout(tabSwitchRef.current.timeout);
     }
 
-    setLoading((s) => ({ ...s, page: false }));
-  }, [currentUser]);
+    tabSwitchRef.current.isSwitching = true;
+    setTabLoading(true);
 
-  /* -----------------------------------------------------------
-     REALTIME SNAPSHOTS (NULL SAFE)
-  ----------------------------------------------------------- */
-  useEffect(() => {
-    if (!currentUser) return;
+    requestAnimationFrame(() => {
+      setActiveTab(tab);
+      
+      tabSwitchRef.current.timeout = setTimeout(() => {
+        setTabLoading(false);
+        tabSwitchRef.current.isSwitching = false;
+      }, 50);
+    });
+  }, [activeTab]);
 
-    loadData();
-    const uid = currentUser.uid;
-
-    const unsub = [];
-
-    // -----------------------
-    // FREE REQUESTS
-    // -----------------------
-    unsub.push(
-      onSnapshot(
-        query(
-          collection(db, "requests"),
-          where("userId", "==", uid),
-          orderBy("createdAt", "desc")
-        ),
-        async (snap) => {
-          const loaded = await Promise.all(
-            snap.docs.map(async (d) => {
-              const r = d.data();
-              if (!r || r.softDeleted) return null;
-
-              let donation = null;
-              let delivery = null;
-
-              if (r.itemId) {
-                const ds = await getDoc(doc(db, "donations", r.itemId));
-                if (ds.exists()) donation = ds.data();
-              }
-
-              const dd = await getDocs(
-                query(
-                  collection(db, "deliveryDetails"),
-                  where("requestId", "==", d.id)
-                )
-              );
-
-              if (!dd.empty) delivery = dd.docs[0].data();
-
-              return {
-                id: d.id,
-                ...r,
-                itemData: donation,
-                deliveryData: delivery,
-                status: delivery?.status || r.status,
-              };
-            })
-          );
-
-          setRequests(filterVisible(loaded));
-        }
-      )
-    );
-
-    // -----------------------
-    // PREMIUM PURCHASES
-    // -----------------------
-    unsub.push(
-      onSnapshot(
-        query(
-          collection(db, "payments"),
-          where("userId", "==", uid),
-          where("type", "==", "item"),
-          orderBy("createdAt", "desc")
-        ),
-        async (snap) => {
-          const loaded = await Promise.all(
-            snap.docs.map(async (d) => {
-              const p = d.data();
-              if (!p || p.softDeleted) return null;
-
-              let donation = null;
-              if (p.targetId) {
-                const ds = await getDoc(doc(db, "donations", p.targetId));
-                if (ds.exists()) donation = ds.data();
-              }
-
-              return {
-                id: d.id,
-                ...p,
-                isPremium: true,
-                premiumStatus: normalizePremiumStatus(p.status),
-                donation,
-              };
-            })
-          );
-
-          setPurchases(filterVisible(loaded));
-        }
-      )
-    );
-
-    // -----------------------
-    // DEPOSITS
-    // -----------------------
-    unsub.push(
-      onSnapshot(
-        query(collection(db, "payments"), where("userId", "==", uid)),
-        (snap) =>
-          setDeposits(
-            snap.docs
-              .map((d) => ({ id: d.id, ...d.data() }))
-              .filter((i) => i && !i.softDeleted)
-          )
-      )
-    );
-
-    // -----------------------
-    // LISTINGS
-    // -----------------------
-    unsub.push(
-      onSnapshot(
-        query(
-          collection(db, "donations"),
-          where("donorId", "==", uid),
-          where("donorType", "==", "user")
-        ),
-        (snap) =>
-          setListings(
-            snap.docs
-              .map((d) => ({ id: d.id, ...d.data() }))
-              .filter((i) => i && !i.softDeleted)
-          )
-      )
-    );
-
-    return () => unsub.forEach((fn) => fn && fn());
-  }, [currentUser, loadData]);
-
-  /* -----------------------------------------------------------
-     ACTION HANDLERS (Soft delete, premium, accept, decline…)
------------------------------------------------------------ */
-
-  const handleDeleteItem = useCallback((item, type) => {
+  // Delete handlers
+  const handleDelete = useCallback((item) => {
     setConfirmModal({
       open: true,
       item,
-      type,
-      action: "soft_delete",
-      message: "Remove this item from your activity?",
+      action: "delete",
+      message: "Remove this item from My Activity?",
     });
   }, []);
 
-  const handleConfirmAction = useCallback(async () => {
-    const { item, type, action } = confirmModal;
+  const confirmDelete = useCallback(async () => {
+    const { item } = confirmModal;
+    if (!item || loading.delete) return;
 
     try {
-      if (!item) return;
-
       setLoading((s) => ({ ...s, delete: item.id }));
+      const ref = !item.isPremium && item.userId
+        ? doc(db, "requests", item.id)
+        : item.isPremium && item.paymentId
+        ? doc(db, "payments", item.paymentId)
+        : doc(db, "donations", item.id);
 
-      let ref = null;
+      await updateDoc(ref, {
+        softDeleted: true,
+        deletedAt: serverTimestamp(),
+      });
+      toast.success("Item removed");
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setLoading((s) => ({ ...s, delete: null }));
+      setConfirmModal({ open: false, item: null, action: null, message: "" });
+    }
+  }, [confirmModal, loading.delete]);
 
-      if (type === "request") ref = doc(db, "requests", item.id);
-      if (type === "deposit" || type === "purchase")
-        ref = doc(db, "payments", item.id);
-      if (type === "listing") ref = doc(db, "donations", item.id);
+  // ======================================================================
+  // BACKLOG #3: DUAL CONFIRMATION DELIVERY HANDLERS
+  // ======================================================================
 
-      if (!ref) throw new Error("Invalid delete target.");
+  // BUYER confirms delivery (FREE or PREMIUM)
+  const handleBuyerConfirmDelivery = useCallback(async (item) => {
+    if (loading.premium) return;
+    
+    try {
+      setLoading((s) => ({ ...s, premium: item.id }));
+      const fn = httpsCallable(functions, "updateBuyerDeliveryConfirmation");
+      const payload = item.isPremium ? { itemId: item.itemId } : { requestId: item.id };
+      const res = await fn(payload);
+      
+      toast[res.data?.ok ? "success" : "error"](
+        res.data?.ok ? "Delivery confirmed." : "Unable to confirm delivery."
+      );
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setLoading((s) => ({ ...s, premium: null }));
+    }
+  }, [loading.premium]);
 
-      if (action === "soft_delete") {
-        await updateDoc(ref, {
-          softDeleted: true,
-          deletedAt: serverTimestamp(),
-        });
-        toast.success("Removed from activity.");
-      }
+  // SELLER confirms delivery (FREE + PREMIUM)
+  const handleSellerConfirmDelivery = useCallback(async (deliveryId) => {
+    if (!deliveryId) return;
 
-      if (action === "cancel_purchase") {
-        const fn = httpsCallable(functions, "cancelPremiumPurchase");
-        const res = await fn({ paymentId: item.id });
+    try {
+      await updateDoc(doc(db, "deliveryDetails", deliveryId), {
+        sellerConfirmedAt: serverTimestamp(),
+      });
 
-        res?.data?.success
-          ? toast.success("Purchase cancelled.")
-          : toast.error("Cancellation failed.");
-      }
+      toast.success("Delivery confirmed (seller).");
     } catch (err) {
       toast.error(err.message);
     }
-
-    setLoading((s) => ({ ...s, delete: null }));
-    setConfirmModal({ open: false, item: null, type: null, action: null });
-  }, [confirmModal]);
-
-  const handleAcceptAward = useCallback((item) => {
-    setAddressModal({ open: true, item });
   }, []);
 
-  const handleDeclineAward = useCallback((item) => {
-    setDeclineModal({ open: true, item });
-  }, []);
+  // Decline award
+  const submitDecline = useCallback(async (item, reason) => {
+    if (loading.decline) return;
 
-  const submitDeclineReason = useCallback(
-    async (item, reason) => {
-      if (!item) return;
+    try {
+      setLoading((s) => ({ ...s, decline: item.id }));
 
-      setLoading((s) => ({ ...s, accept: item.id }));
+      await updateDoc(doc(db, "requests", item.id), {
+        status: "declined",
+        softDeleted: true,
+        declineReason: reason || "",
+        updatedAt: serverTimestamp(),
+      });
+
+      toast.success("You declined the award.");
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setDeclineModal({ open: false, item: null });
+      setLoading((s) => ({ ...s, decline: null }));
+    }
+  }, [loading.decline]);
+
+  // Address submission
+  const submitAddress = useCallback(
+    async ({ item, address, phone, instructions }) => {
+      if (loading.address) return;
 
       try {
+        setLoading((s) => ({ ...s, address: item.id }));
         const batch = writeBatch(db);
 
         batch.update(doc(db, "requests", item.id), {
-          status: "declined",
-          deliveryStatus: "declined",
-          declineReason: reason || "",
-          softDeleted: true,
-          updatedAt: serverTimestamp(),
-        });
-
-        await batch.commit();
-        toast.success("Request declined.");
-      } catch (err) {
-        toast.error(err.message);
-      }
-
-      setDeclineModal({ open: false, item: null });
-      setLoading((s) => ({ ...s, accept: null }));
-    },
-    []
-  );
-  const handleAddressConfirmation = useCallback(
-  async ({ item, address, phone, instructions }) => {
-    if (!item) return;
-
-    setLoading((s) => ({ ...s, address: item.id }));
-
-    try {
-      const batch = writeBatch(db);
-
-      batch.update(doc(db, "requests", item.id), {
-        status: "accepted",
-        deliveryStatus: "accepted",
-        updatedAt: serverTimestamp(),
-      });
-
-      batch.set(
-        doc(db, "deliveryDetails", item.id),
-        {
           status: "accepted",
           deliveryStatus: "accepted",
           updatedAt: serverTimestamp(),
-          addressInfo: {
-            address,
-            phone,
-            instructions: instructions || "",
+        });
+
+        batch.set(
+          doc(db, "deliveryDetails", item.id),
+          {
+            deliveryStatus: "accepted",
+            updatedAt: serverTimestamp(),
+            addressInfo: { address, phone, instructions },
+            requestId: item.id,
+            itemId: item.itemId,
+            userId: currentUser.uid,
           },
-          requestId: item.id,
-          userId: currentUser.uid,
-          itemId: item.itemId,
-        },
-        { merge: true }
-      );
+          { merge: true }
+        );
 
-      await batch.commit();
-      toast.success("Address saved!");
-    } catch (err) {
-      toast.error(err.message);
-    }
-
-    setAddressModal({ open: false, item: null });
-    setLoading((s) => ({ ...s, address: null }));
-  },
-  [currentUser]
-);
-
-
-  const handleConfirmDelivery = useCallback(async (item) => {
-    if (!item) return;
-
-    setLoading((s) => ({ ...s, confirm: item.id }));
-
-    try {
-      const batch = writeBatch(db);
-
-      batch.update(doc(db, "requests", item.id), {
-        status: "completed",
-        deliveryStatus: "delivered",
-        deliveredAt: serverTimestamp(),
-        softDeleted: true,
-      });
-
-      await batch.commit();
-      toast.success("Delivery confirmed!");
-    } catch (err) {
-      toast.error(err.message);
-    }
-
-    setLoading((s) => ({ ...s, confirm: null }));
-  }, []);
-
-  const handlePremiumAction = useCallback(async (item, action) => {
-    if (action === "cancel_purchase") {
-      return setConfirmModal({
-        open: true,
-        item,
-        type: "purchase",
-        action: "cancel_purchase",
-        message: "Cancel premium purchase?",
-      });
-    }
-
-    if (action === "confirm_delivery") {
-      try {
-        setLoading((s) => ({ ...s, premium: item.id }));
-
-        const fn = httpsCallable(functions, "confirmPremiumDelivery");
-        const res = await fn({ paymentId: item.id });
-
-        res?.data?.success
-          ? toast.success("Premium delivery confirmed!")
-          : toast.error("Failed to confirm.");
-
+        await batch.commit();
+        toast.success("Address saved.");
       } catch (err) {
         toast.error(err.message);
+      } finally {
+        setAddressModal({ open: false, item: null });
+        setLoading((s) => ({ ...s, address: null }));
       }
+    },
+    [currentUser, loading.address]
+  );
 
-      setLoading((s) => ({ ...s, premium: null }));
+  // ======================================================================
+  // PATCH 2 & 3: ENHANCED DELIVERY DETAILS + SELLER PICKUP HANDLERS
+  // ======================================================================
+
+  // Seller schedules pickup (FREE items)
+  const handlePickupSchedule = useCallback(async (item, pickupData) => {
+    if (loading.schedule) return;
+
+    try {
+      setLoading((s) => ({ ...s, schedule: item.id }));
+
+      // Check if this is FREE item scheduling
+      if (pickupData && pickupData.requestId) {
+        // FREE item: save to request document
+        await updateDoc(doc(db, "requests", pickupData.requestId), {
+          sellerPickupDate: pickupData.pickupDate || serverTimestamp(),
+          sellerPickupWindow: pickupData.pickupWindow || "",
+          sellerPickupStatus: "proposed",
+          sellerPickupUpdatedAt: serverTimestamp(),
+        });
+        toast.success("Pickup date proposed.");
+      } else {
+        // PREMIUM item (mock)
+        toast.success("Pickup scheduled (mock)");
+      }
+    } catch (err) {
+      console.error("Pickup scheduling error:", err);
+      toast.error(err.message || "Failed to schedule pickup");
+    } finally {
+      setPickupModal({ open: false, donation: null, mode: "free", requestId: null });
+      setLoading((s) => ({ ...s, schedule: null }));
+    }
+  }, [loading.schedule]);
+
+  // Fetch delivery details for listing
+  const fetchListingDeliveryDetails = useCallback(async (listing) => {
+    try {
+      // Check if listing has a deliveryDetails field
+      if (listing.deliveryDetails) {
+        return listing.deliveryDetails;
+      }
+      
+      // Check if there's a deliveryDetails collection entry
+      const deliveryDoc = await getDoc(doc(db, "deliveryDetails", listing.id));
+      if (deliveryDoc.exists()) {
+        return deliveryDoc.data();
+      }
+      
+      return null;
+    } catch (err) {
+      console.error("Error fetching listing delivery details:", err);
+      return null;
     }
   }, []);
 
-  const handleSchedulePickup = useCallback(
-  async (donationId, date) => {
-    if (!donationId) return;
-
-    setLoading((s) => ({ ...s, schedule: donationId }));
-
+  // Enhanced view handler for listings
+  const handleViewListing = useCallback(async (listing) => {
+    setLoadingDeliveryDetails((prev) => ({ ...prev, [listing.id]: true }));
+    
     try {
-      const snap = await getDocs(
-        query(
-          collection(db, "requests"),
-          where("itemId", "==", donationId),
-          where("status", "in", ["awarded", "accepted"])
-        )
-      );
+      // Fetch delivery details
+      const deliveryDetails = await fetchListingDeliveryDetails(listing);
+      
+      // Create enhanced listing
+      const enhancedListing = {
+        ...listing,
+        deliveryDetails: deliveryDetails,
+        donation: listing.donation ? {
+          ...listing.donation,
+          deliveryDetails: deliveryDetails
+        } : undefined
+      };
 
-      if (snap.empty) {
-        toast.error("No active request found.");
+      setDrawer({ 
+        open: true, 
+        type: "listing", 
+        item: enhancedListing 
+      });
+    } catch (err) {
+      console.error("Error loading listing details:", err);
+      setDrawer({ 
+        open: true, 
+        type: "listing", 
+        item: listing 
+      });
+    } finally {
+      setLoadingDeliveryDetails((prev) => ({ ...prev, [listing.id]: false }));
+    }
+  }, [fetchListingDeliveryDetails]);
+
+  // Schedule pickup handler for listings
+  const handleListingSchedulePickup = useCallback((listing) => {
+    if (!listing) return;
+
+    const isFreeItem = listing.donation?.type !== "premium";
+
+    // -------------------------------------------
+    // FREE ITEMS — pickup must be request-gated
+    // -------------------------------------------
+    if (isFreeItem) {
+      // requestId must come from request context, never fallback
+      const requestId = listing.deliveryDetails?.requestId || null;
+
+      if (!listing.hasActiveRequest || !requestId) {
+        toast.error("Pickup cannot be scheduled yet.");
         return;
       }
 
-      const requestId = snap.docs[0].id;
-
-      const batch = writeBatch(db);
-
-      batch.update(doc(db, "requests", requestId), {
-        deliveryStatus: "pickup_scheduled",
-        pickupDate: date,
-        updatedAt: serverTimestamp(),
+      setPickupModal({
+        open: true,
+        donation: listing,
+        requestId,
+        mode: "free",
       });
 
-      batch.set(
-        doc(db, "deliveryDetails", requestId),
-        {
-          deliveryStatus: "pickup_scheduled",
-          pickupDate: date,
-          updatedAt: serverTimestamp(),
-          requestId,
-        },
-        { merge: true }
-      );
-
-      await batch.commit();
-      toast.success("Pickup scheduled!");
-    } catch (err) {
-      toast.error(err.message);
+      return;
     }
 
-    setPickupModal({ open: false, donation: null });
-    setLoading((s) => ({ ...s, schedule: null }));
-  },
-  []
-);
+    // -------------------------------------------
+    // PREMIUM ITEMS — logistics visibility / future confirmation
+    // -------------------------------------------
+    setPickupModal({
+      open: true,
+      donation: listing,
+      mode: "premium",
+    });
+  }, []);
 
-  const handleRelistItem = useCallback(async (item) => {
-    setLoading((s) => ({ ...s, relist: item.id }));
+  // Relist item
+  const handleRelist = useCallback(async (item) => {
+    if (loading.relist) return;
 
     try {
+      setLoading((s) => ({ ...s, relist: item.id }));
+
       await updateDoc(doc(db, "donations", item.id), {
         status: "relisted",
         updatedAt: serverTimestamp(),
@@ -655,287 +559,320 @@ export default function MyActivity() {
       toast.success("Item relisted.");
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setRelistModal({ open: false, item: null });
+      setLoading((s) => ({ ...s, relist: null }));
     }
+  }, [loading.relist]);
 
-    setRelistModal({ open: false, item: null });
-    setLoading((s) => ({ ...s, relist: null }));
+  // ======================================================================
+  // CLEANUP
+  // ======================================================================
+
+  useEffect(() => {
+    return () => {
+      if (tabSwitchRef.current.timeout) {
+        clearTimeout(tabSwitchRef.current.timeout);
+      }
+    };
   }, []);
 
-  /* -----------------------------------------------------------
-     UI COMPONENTS
------------------------------------------------------------ */
+  // ======================================================================
+  // BACKLOG #3: AUTO-COMPLETE DELIVERY WHEN BOTH CONFIRM
+  // ======================================================================
 
-  const TabButton = ({ label, icon: Icon, active, count, onClick }) => (
-    <button
-      onClick={onClick}
-      className={`flex flex-col items-center justify-center flex-1 py-3 border-b-2 relative ${
-        active ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500"
-      }`}
-    >
-      <Icon size={18} className="mb-1" />
-      <span className="text-xs font-medium">{label}</span>
+  // Auto-complete delivery when buyer + seller have confirmed
+  useEffect(() => {
+    const deliveries = [];
 
-      {count > 0 && (
-        <span className="absolute -top-1 right-3 px-1.5 py-0.5 text-[10px] bg-gray-100 text-gray-700 rounded-full">
-          {count}
-        </span>
-      )}
-    </button>
-  );
+    visReq.forEach((r) => {
+      if (r.deliveryDetails) deliveries.push(r.deliveryDetails);
+    });
 
-  const FloatingActionButton = () => (
-    <button
-      onClick={() => navigate("/donate")}
-      className="fixed bottom-24 right-6 z-[999] bg-blue-600 hover:bg-blue-700 text-white shadow-xl flex items-center gap-2 px-4 py-3 rounded-full"
-    >
-      <Plus size={20} />
-      <span className="text-sm font-semibold">List Item</span>
-    </button>
-  );
+    visPur.forEach((p) => {
+      if (p.deliveryDetails) deliveries.push(p.deliveryDetails);
+    });
 
-  const EmptyState = ({ icon: Icon, title, desc }) => (
-    <div className="bg-white border rounded-xl p-10 text-center">
-      <Icon className="mx-auto mb-4 text-gray-300" size={52} />
-      <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
-      <p className="text-gray-500 text-sm mt-1">{desc}</p>
-    </div>
-  );
+    deliveries.forEach(async (delivery) => {
+      if (
+        delivery.buyerConfirmedAt &&
+        delivery.sellerConfirmedAt &&
+        delivery.deliveryStatus !== "completed"
+      ) {
+        try {
+          await updateDoc(doc(db, "deliveryDetails", delivery.id), {
+            deliveryStatus: "completed",
+            deliveryCompletedAt: serverTimestamp(),
+          });
+        } catch (err) {
+          console.error("Auto-complete delivery failed:", err);
+        }
+      }
+    });
+  }, [visReq, visPur]);
 
-  /* -----------------------------------------------------------
-     MAIN RENDER
------------------------------------------------------------ */
+  // ======================================================================
+  // RENDER
+  // ======================================================================
 
-  if (loading.page) {
+  if (!currentUser) {
     return (
-      <div className="flex justify-center items-center min-h-screen bg-gray-50">
-        <Loader2 size={36} className="animate-spin text-blue-600" />
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="animate-spin text-blue-600" size={36} />
       </div>
     );
   }
 
+  // ======================================================================
+  // CONTENT RENDERER
+  // ======================================================================
+
+  const renderContent = () => {
+    if (tabLoading) {
+      return (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="animate-spin text-gray-400" size={28} />
+        </div>
+      );
+    }
+
+    // Show donation loading only for requests tab
+    if (activeTab === "requests" && donationLoading && visReq.length > 0) {
+      return (
+        <div className="flex flex-col items-center justify-center py-16">
+          <Loader2 className="animate-spin text-gray-400 mb-4" size={28} />
+          <p className="text-sm text-gray-500">Loading donation details...</p>
+        </div>
+      );
+    }
+
+    switch (activeTab) {
+      case "requests":
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {visReq.map((req) => (
+              <RequestCard
+                key={req.id}
+                item={req}
+                currentUser={currentUser}
+                onView={() => setDrawer({ open: true, type: "free", item: req })}
+                onDelete={() => handleDelete(req)}
+                onAwardAction={(item, action) => {
+                  action === "accept"
+                    ? setAddressModal({ open: true, item })
+                    : setDeclineModal({ open: true, item });
+                }}
+              />
+            ))}
+          </div>
+        );
+
+      case "purchases":
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {visPur.map((p) => (
+              <PurchaseCard
+                key={p.id}
+                item={p}
+                onView={() => setDrawer({ open: true, type: "premium", item: p })}
+                onDelete={() => handleDelete(p)}
+              />
+            ))}
+          </div>
+        );
+
+      case "listings":
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {listingsWithRequestInfo.map((l) => (
+              <ListingCard
+                key={l.id}
+                item={l}
+                currentUser={currentUser}
+                onView={() => handleViewListing(l)}
+                onDelete={() => handleDelete(l)}
+                onRelist={() => setRelistModal({ open: true, item: l })}
+                onSchedulePickup={() => handleListingSchedulePickup(l)}
+                onSellerConfirmDelivery={handleSellerConfirmDelivery}
+                isLoading={loadingDeliveryDetails[l.id]}
+                showDeliveryInfo={true}
+              />
+            ))}
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  // ======================================================================
+  // ENHANCED DRAWER HANDLING
+  // ======================================================================
+
+  const renderDrawer = () => {
+    if (!drawer.open) return null;
+
+    switch (drawer.type) {
+      case "free":
+        return (
+          <DetailDrawerFree
+            open={drawer.open}
+            item={drawer.item}
+            currentUser={currentUser}
+            onClose={() => setDrawer({ open: false, type: null, item: null })}
+            onBuyerConfirm={() => handleBuyerConfirmDelivery(drawer.item)}
+            onDelete={() => handleDelete(drawer.item)}
+            onAcceptAward={() => setAddressModal({ open: true, item: drawer.item })}
+            onDeclineAward={() => setDeclineModal({ open: true, item: drawer.item })}
+            onSellerConfirmDelivery={handleSellerConfirmDelivery}
+          />
+        );
+
+      case "premium":
+        return (
+          <DetailDrawerPremium
+            open={drawer.open}
+            item={drawer.item}
+            currentUser={currentUser}
+            onClose={() => setDrawer({ open: false, type: null, item: null })}
+            onBuyerConfirm={() => handleBuyerConfirmDelivery(drawer.item)}
+            onDelete={() => handleDelete(drawer.item)}
+            onSchedulePickup={() => setPickupModal({ open: true, donation: drawer.item, mode: "premium" })}
+            showDeliveryDetails={!!drawer.item?.deliveryDetails}
+            onSellerConfirmDelivery={handleSellerConfirmDelivery}
+          />
+        );
+
+      case "listing":
+        return (
+          <DetailDrawerPremium
+            open={drawer.open}
+            item={drawer.item}
+            currentUser={currentUser}
+            onClose={() => setDrawer({ open: false, type: null, item: null })}
+            onBuyerConfirm={() => handleBuyerConfirmDelivery(drawer.item)}
+            onDelete={() => handleDelete(drawer.item)}
+            onSchedulePickup={() => setPickupModal({ 
+              open: true, 
+              donation: drawer.item,
+              mode: drawer.item?.donation?.type === "premium" ? "premium" : "free"
+            })}
+            showDeliveryDetails={!!drawer.item?.deliveryDetails}
+            onSellerConfirmDelivery={handleSellerConfirmDelivery}
+          />
+        );
+
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
-
       {/* HEADER */}
-      <div className="sticky top-0 bg-white border-b z-30 p-4 shadow-sm">
+      <div className="sticky top-0 bg-white border-b p-4 z-20">
         <h1 className="text-xl font-bold">My Activity</h1>
         <p className="text-xs text-gray-500">
-          Manage requests, purchases, deposits & listings
+          Track your requests, purchases & listings
         </p>
       </div>
 
-      {/* TAB BAR */}
-      <div className="sticky top-[64px] bg-white border-b z-20 px-2 flex h-14 items-center">
-        <TabButton
+      {/* TABS */}
+      <div className="sticky top-[64px] bg-white border-b flex h-14 px-2 relative">
+        <MemoTabBtn
           label="Requests"
           icon={Gift}
           active={activeTab === "requests"}
-          count={filterVisible(requests).length}
-          onClick={() => setActiveTab("requests")}
+          count={visReq.length}
+          onClick={() => handleTabSwitch("requests")}
+          disabled={tabLoading}
         />
-        <TabButton
+        <MemoTabBtn
           label="Purchases"
           icon={ShoppingBag}
           active={activeTab === "purchases"}
-          count={filterVisible(purchases).length}
-          onClick={() => setActiveTab("purchases")}
+          count={visPur.length}
+          onClick={() => handleTabSwitch("purchases")}
+          disabled={tabLoading}
         />
-        <TabButton
-          label="Deposits"
-          icon={CreditCard}
-          active={activeTab === "deposits"}
-          count={filterVisible(deposits).length}
-          onClick={() => setActiveTab("deposits")}
-        />
-        <TabButton
+        <MemoTabBtn
           label="Listings"
           icon={List}
           active={activeTab === "listings"}
-          count={filterVisible(listings).length}
-          onClick={() => setActiveTab("listings")}
+          count={visList.length}
+          onClick={() => handleTabSwitch("listings")}
+          disabled={tabLoading}
         />
+        {tabLoading && (
+          <div className="absolute inset-0 bg-white bg-opacity-50 flex items-center justify-center">
+            <Loader2 className="animate-spin text-blue-600" size={20} />
+          </div>
+        )}
       </div>
 
       {/* CONTENT */}
       <div className="p-4">
-
-        {/* EMPTY STATES */}
-        {activeTab === "requests" && filterVisible(requests).length === 0 && (
-          <EmptyState
-            icon={Gift}
-            title="No Requests"
-            desc="You haven't requested any items yet."
-          />
-        )}
-
-        {activeTab === "purchases" &&
-          filterVisible(purchases).length === 0 && (
-            <EmptyState
-              icon={ShoppingBag}
-              title="No Purchases"
-              desc="Your premium purchases will appear here."
-            />
-          )}
-
-        {activeTab === "deposits" &&
-          filterVisible(deposits).length === 0 && (
-            <EmptyState
-              icon={CreditCard}
-              title="No Deposits"
-              desc="Your payment deposits will appear here."
-            />
-          )}
-
-        {activeTab === "listings" &&
-          filterVisible(listings).length === 0 && (
-            <EmptyState
-              icon={List}
-              title="No Listings"
-              desc="You haven't listed any items yet."
-            />
-          )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-
-          {/* REQUEST CARDS */}
-          {activeTab === "requests" &&
-            filterVisible(requests).map((item) => (
-              <RequestCard
-                key={item.id}
-                item={item}
-                deleting={loading.delete === item.id}
-                onView={() =>
-                  setDrawer({ open: true, type: "request", item })
-                }
-                onDelete={() => handleDeleteItem(item, "request")}
-                onAwardAction={(i, action) =>
-                  action === "accept"
-                    ? handleAcceptAward(i)
-                    : handleDeclineAward(i)
-                }
-              />
-            ))}
-
-          {/* PURCHASE CARDS */}
-          {activeTab === "purchases" &&
-            filterVisible(purchases).map((item) => (
-              <PurchaseCard
-                key={item.id}
-                item={item}
-                loading={loading.premium === item.id}
-                onDelete={() => handleDeleteItem(item, "purchase")}
-                onView={() =>
-                  setDrawer({ open: true, type: "purchase", item })
-                }
-                onPremiumAction={(action) =>
-                  handlePremiumAction(item, action)
-                }
-              />
-            ))}
-
-          {/* DEPOSIT CARDS */}
-          {activeTab === "deposits" &&
-            filterVisible(deposits).map((item) => (
-              <DepositCard
-                key={item.id}
-                item={item}
-                deleting={loading.delete === item.id}
-                onDelete={() => handleDeleteItem(item, "deposit")}
-              />
-            ))}
-
-          {/* LISTINGS */}
-          {activeTab === "listings" &&
-            filterVisible(listings).map((listing) => (
-              <ListingCard
-                key={listing.id}
-                item={listing}
-                loading={loading.delete === listing.id}
-                onView={() =>
-                  setDrawer({
-                    open: true,
-                    type: "listing",
-                    item: listing,
-                  })
-                }
-                onRelist={() =>
-                  setRelistModal({ open: true, item: listing })
-                }
-                onDelete={() => handleDeleteItem(listing, "listing")}
-              />
-            ))}
-        </div>
+        {renderContent()}
       </div>
 
-      <FloatingActionButton />
+      <MemoFAB navigate={navigate} />
+
+      {/* DRAWERS */}
+      {renderDrawer()}
 
       {/* MODALS */}
-      <DetailDrawer
-        open={drawer.open}
-        data={drawer.item}
-        drawerType={drawer.type}
-        currentUser={currentUser}
-        loadingStates={loading}
-        onClose={() => setDrawer({ open: false, item: null, type: null })}
-        onDelete={(item) => handleDeleteItem(item, drawer.type)}
-        onAcceptAward={handleAcceptAward}
-        onDeclineAward={handleDeclineAward}
-        onConfirmDelivery={handleConfirmDelivery}
-        onSchedulePickup={(item) =>
-          setPickupModal({ open: true, donation: item })
-        }
-        onPremiumAction={handlePremiumAction}
-        onRelist={handleRelistItem}
-      />
-
-      <DeclineReasonModal
-        open={declineModal.open}
-        item={declineModal.item}
-        loading={loading.accept === declineModal.item?.id}
-        onClose={() => setDeclineModal({ open: false, item: null })}
-        onSubmit={(reason) =>
-          submitDeclineReason(declineModal.item, reason)
-        }
-      />
-
-      <AddressConfirmationModal
-        open={addressModal.open}
-        request={addressModal.item}
-        onClose={() => setAddressModal({ open: false, item: null })}
-        onConfirm={handleAddressConfirmation}
+      <RelistModal
+        open={relistModal.open}
+        item={relistModal.item}
+        loading={loading.relist === relistModal.item?.id}
+        onClose={() => setRelistModal({ open: false, item: null })}
+        onRelist={handleRelist}
       />
 
       <PickupModal
         open={pickupModal.open}
         donation={pickupModal.donation}
         loading={loading.schedule}
-        onClose={() =>
-          setPickupModal({ open: false, donation: null })
-        }
-        onSchedule={handleSchedulePickup}
+        onClose={() => setPickupModal({ open: false, donation: null, mode: "free", requestId: null })}
+        onSchedule={(pickupData) => {
+          if (pickupModal.donation) {
+            handlePickupSchedule(pickupModal.donation, pickupData);
+          }
+        }}
+        mode={pickupModal.mode}
+        requestId={pickupModal.requestId}
       />
 
-      <RelistModal
-        open={relistModal.open}
-        item={relistModal.item}
-        loading={loading.relist === relistModal.item?.id}
-        onClose={() => setRelistModal({ open: false, item: null })}
-        onRelist={handleRelistItem}
+      <DeclineReasonModal
+        open={declineModal.open}
+        item={declineModal.item}
+        loading={loading.decline === declineModal.item?.id}
+        onSubmit={(reason) => submitDecline(declineModal.item, reason)}
+        onClose={() => setDeclineModal({ open: false, item: null })}
+      />
+
+      <AddressConfirmationModal
+        open={addressModal.open}
+        request={addressModal.item}
+        loading={loading.address === addressModal.item?.id}
+        onConfirm={submitAddress}
+        onClose={() => setAddressModal({ open: false, item: null })}
       />
 
       <ConfirmActionModal
         open={confirmModal.open}
         message={confirmModal.message}
         loading={loading.delete === confirmModal.item?.id}
+        onConfirm={confirmDelete}
         onClose={() =>
           setConfirmModal({
             open: false,
-            item: null,
-            type: null,
             action: null,
+            item: null,
+            message: "",
           })
         }
-        onConfirm={handleConfirmAction}
       />
     </div>
   );

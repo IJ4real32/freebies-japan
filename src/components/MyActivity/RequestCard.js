@@ -1,147 +1,193 @@
-// =============================================================
-// FILE: RequestCard.jsx (PHASE-2 — FINAL STABLE PATCH)
-// =============================================================
+// ============================================================================
+// FILE: RequestCard.jsx — PHASE-2 FINAL STRICT FREE-ITEM REQUEST CARD (PATCHED)
+// Free items ONLY — No premium logic allowed.
+// Mobile-first layout — works with Request drawer.
+// FIXES:
+// - Guaranteed image rendering
+// - Safe donation fallback
+// - Zero assumptions about joined data
+// ============================================================================
 
 import React from "react";
 import { motion } from "framer-motion";
 import {
   Trash,
   Loader2,
-  Calendar,
   Award,
-  AlertCircle,
   Check,
   X,
 } from "lucide-react";
 import StatusBadge from "./StatusBadge";
 
-// Allowed delete statuses (your confirmed rule)
-const ALLOW_DELETE = ["declined", "completed", "delivered"];
+/* ------------------------------------------------------------
+   CONSTANTS
+------------------------------------------------------------ */
 
+// Delivery states where buyer cannot act anymore
+const DELIVERY_LOCK = [
+  "accepted",
+  "pickup_scheduled",
+  "in_transit",
+  "out_for_delivery",
+  "delivered",
+  "buyer_confirmed",
+];
+
+// Allowed delete states
+const ALLOW_DELETE = [
+  "rejected",
+  "cancelled",
+  "expired",
+  "completed",
+  "delivered",
+  "buyer_confirmed",
+];
+
+/* ------------------------------------------------------------
+   IMAGE RESOLVER (CRITICAL FIX)
+------------------------------------------------------------ */
+const resolveImage = (item) => {
+  // Preferred: joined donation images
+  if (item?.donation?.images?.length) {
+    return item.donation.images[0];
+  }
+
+  // Fallback: embedded images (legacy / partial joins)
+  if (item?.itemImages?.length) {
+    return item.itemImages[0];
+  }
+
+  // Absolute fallback
+  return "/images/default-item.jpg";
+};
+
+/* ------------------------------------------------------------
+   COMPONENT
+------------------------------------------------------------ */
 export default function RequestCard({
   item,
+  currentUser,
   onView,
   onDelete,
-  onAwardAction,
+  onAwardAction,            // accept / decline award
+  onBuyerConfirmDelivery,   // Confirm delivery (FREE)
   deleting,
 }) {
-  // ============================================================
-  // 1. SAFETY — Ignore premium (MyActivity filters but recheck here)
-  // ============================================================
-  if (!item || item?.itemData?.type === "premium") return null;
+  if (!item) return null;
 
-  // ============================================================
-  // 2. DELETE RULES  (FINAL LOGIC)
-  // ============================================================
-  const canDelete = ALLOW_DELETE.includes(item.status);
+  const donation = item.donation || {};
+  const delivery = item.deliveryData || {};
 
-  // ============================================================
-  // 3. AWARD FLOW — only if free + awarded and not already accepted
-  // ============================================================
-  const showAwardAction =
-    item.status === "awarded" &&
-    !["accepted", "completed"].includes(item.deliveryStatus);
+  // Premium items MUST NOT show here
+  if (donation.type === "premium" || item.isPremium) return null;
 
-  // ============================================================
-  // 4. HELPERS
-  // ============================================================
-  const getTitle = () =>
-    item.itemData?.title || item.itemTitle || "Untitled Item";
+  const userId = currentUser?.uid;
+  const isBuyer = userId === item.userId;
+  const isSeller = userId === donation.donorId;
 
-  const getImage = () =>
-    item.itemData?.images?.[0] ??
-    item.itemImages?.[0] ??
-    "/images/default-item.jpg";
+  const deliveryStatus = (delivery.deliveryStatus || "")
+    .toLowerCase()
+    .replace(/[-_]/g, "");
 
-  const getDate = () => {
+  const isLocked = DELIVERY_LOCK.includes(deliveryStatus);
+
+  // Delete permission
+  const canDelete = ALLOW_DELETE.includes(item.status) && !isLocked;
+
+  // Award zone (buyer only)
+  const canAcceptOrDecline = item.status === "awarded" && isBuyer;
+
+  // FREE DELIVERY CONFIRMATION (buyer only)
+  const canBuyerConfirmDelivery =
+    isBuyer &&
+    ["delivered", "intransit", "outfordelivery", "completioncheck"].includes(
+      deliveryStatus
+    );
+
+  // ✅ SAFE IMAGE
+  const img = resolveImage(item);
+
+  const safeClick = (e) => {
+    if (e.target.closest(".action-btn")) return;
+    onView(item);
+  };
+
+  const formatDate = () => {
     try {
       if (item.updatedAt?.toDate)
         return item.updatedAt.toDate().toLocaleDateString();
-      if (item.updatedAt) return new Date(item.updatedAt).toLocaleDateString();
-      return "—";
-    } catch {
-      return "—";
-    }
+      if (item.updatedAt)
+        return new Date(item.updatedAt).toLocaleDateString();
+    } catch {}
+    return "—";
   };
 
-  // Prevent drawer open when clicking action buttons
-  const handleCardClick = (e) => {
-    if (e.target.closest(".action-button")) return;
-    onView();
-  };
-
-  const handleAcceptAward = (e) => {
-    e.stopPropagation();
-    onAwardAction(item, "accept");
-  };
-
-  const handleDeclineAward = (e) => {
-    e.stopPropagation();
-    onAwardAction(item, "decline");
-  };
-
-  const handleDelete = (e) => {
-    e.stopPropagation();
-    if (!canDelete) return;
-    onDelete(item);
-  };
-
-  // ============================================================
-  // 5. UI
-  // ============================================================
   return (
     <motion.div
-      initial={{ opacity: 0, y: 15 }}
+      initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer relative"
-      onClick={handleCardClick}
+      onClick={safeClick}
+      className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all cursor-pointer relative"
     >
-      {/* ====================== AWARD BADGE ======================= */}
-      {showAwardAction && (
-        <div className="absolute top-3 left-3 z-20">
-          <div className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white text-xs px-3 py-1.5 rounded-full font-bold shadow-lg flex items-center gap-1 animate-pulse">
-            <Award size={12} /> AWARDED
-          </div>
+      {/* BUYER / SELLER BADGE */}
+      {(isBuyer || isSeller) && (
+        <div className="absolute bottom-3 left-3 bg-black/70 text-white text-[10px] px-2 py-1 rounded-full z-20">
+          {isBuyer ? "Your Request" : "Your Item"}
         </div>
       )}
 
-      {/* ====================== LEGACY BADGE ====================== */}
-      {item.status === "deleted" && (
-        <div className="absolute top-3 left-3 z-20">
-          <div className="bg-red-500 text-white text-xs px-3 py-1.5 rounded-full font-bold shadow-lg flex items-center gap-1">
-            <AlertCircle size={12} /> LEGACY
-          </div>
+      {/* AWARDED BADGE */}
+      {item.status === "awarded" && (
+        <div className="absolute top-3 left-3 bg-purple-600 text-white text-xs px-3 py-1.5 rounded-full font-semibold shadow-lg z-20 flex items-center gap-1">
+          <Award size={12} />
+          AWARDED
         </div>
       )}
 
-      {/* ====================== ACTION BUTTONS ====================== */}
-      <div className="absolute top-3 right-3 z-20 flex gap-2">
-        
-        {/* Accept / Decline Award */}
-        {showAwardAction && (
-          <div className="flex gap-1 action-button">
+      {/* DELIVERY LOCK RIBBON */}
+      {isLocked && (
+        <div className="absolute top-3 left-3 bg-red-600 text-white text-xs px-3 py-1.5 rounded-full font-semibold shadow-lg z-30">
+          Delivery In Progress
+        </div>
+      )}
+
+      {/* ACTION BUTTONS */}
+      <div className="absolute top-3 right-3 z-30 flex gap-2">
+
+        {/* Award accept / decline (buyer only) */}
+        {canAcceptOrDecline && (
+          <>
             <button
-              onClick={handleAcceptAward}
-              className="bg-green-600 hover:bg-green-700 text-white p-2 rounded-full shadow-md transition hover:scale-110"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAwardAction(item, "accept");
+              }}
+              className="action-btn bg-green-600 hover:bg-green-700 text-white p-2 rounded-full shadow transition hover:scale-110"
             >
               <Check size={14} />
             </button>
 
             <button
-              onClick={handleDeclineAward}
-              className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-full shadow-md transition hover:scale-110"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAwardAction(item, "decline");
+              }}
+              className="action-btn bg-red-600 hover:bg-red-700 text-white p-2 rounded-full shadow transition hover:scale-110"
             >
               <X size={14} />
             </button>
-          </div>
+          </>
         )}
 
-        {/* DELETE — Based ONLY on ALLOW_DELETE rule */}
+        {/* Delete */}
         {canDelete && (
           <button
-            onClick={handleDelete}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(item);
+            }}
             disabled={deleting}
-            className="action-button bg-red-500 hover:bg-red-600 text-white p-2 rounded-full shadow-md transition hover:scale-110 disabled:opacity-40"
+            className="action-btn bg-red-500 hover:bg-red-600 text-white p-2 rounded-full shadow transition hover:scale-110 disabled:opacity-40"
           >
             {deleting ? (
               <Loader2 size={14} className="animate-spin" />
@@ -152,41 +198,50 @@ export default function RequestCard({
         )}
       </div>
 
-      {/* ====================== IMAGE ====================== */}
+      {/* IMAGE */}
       <div className="relative w-full h-48 bg-gray-100 rounded-t-xl overflow-hidden">
         <img
-          src={getImage()}
-          alt={getTitle()}
-          className="w-full h-full object-cover hover:scale-105 transition duration-300"
-          onError={(e) => (e.target.src = "/images/default-item.jpg")}
+          src={img}
+          alt={donation.title || "Item"}
+          loading="lazy"
+          className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
+          onError={(e) => {
+            e.currentTarget.onerror = null;
+            e.currentTarget.src = "/images/default-item.jpg";
+          }}
         />
-
-        {/* Size */}
-        {item.itemData?.size && (
-          <div className="absolute bottom-2 right-2 bg-white/90 text-gray-800 text-xs px-2 py-1 rounded font-medium">
-            {item.itemData.size}
-          </div>
-        )}
       </div>
 
-      {/* ====================== BODY ====================== */}
+      {/* BODY */}
       <div className="p-4">
         <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2">
-          {getTitle()}
+          {donation.title || "Untitled Item"}
         </h3>
 
         <p className="text-gray-600 text-sm mb-3 line-clamp-2">
-          {item.itemData?.description || "No description available."}
+          {donation.description || "No description available."}
         </p>
 
-        {/* Status + Updated Date */}
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between">
           <StatusBadge
             status={item.status}
-            deliveryStatus={item.deliveryStatus}
+            deliveryStatus={delivery.deliveryStatus}
           />
-          <span className="text-xs text-gray-500">{getDate()}</span>
+          <span className="text-xs text-gray-500">{formatDate()}</span>
         </div>
+
+        {/* BUYER DELIVERY CONFIRMATION */}
+        {canBuyerConfirmDelivery && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onBuyerConfirmDelivery(item);
+            }}
+            className="w-full mt-3 py-2 bg-indigo-600 text-white rounded-lg shadow hover:bg-indigo-700 text-sm"
+          >
+            Confirm Delivery
+          </button>
+        )}
       </div>
     </motion.div>
   );

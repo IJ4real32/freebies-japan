@@ -1,9 +1,11 @@
-// ================================================================
-// FILE: PremiumTimeline.js  — FINAL PHASE-2 PREMIUM DELIVERY TIMELINE
-// - Supports all premium states including sellerAccepted
-// - Clean vertical timeline with stable order
-// - Fully aligned with PremiumStatusConfig, DetailDrawer & PremiumActionPanel
-// ================================================================
+// =====================================================================
+// FILE: PremiumTimeline.js — PHASE-2 FINAL (Backend-Aligned)
+// Matches allowedTransitions in premiumActions.ts
+// Supports:
+//  - sellerScheduledPickup
+//  - completionCheck
+//  - buyerDeclinedAtDoor
+// =====================================================================
 
 import React from "react";
 import {
@@ -17,26 +19,39 @@ import {
 
 export default function PremiumTimeline({ currentStatus }) {
   // ============================================================
-  // FULL ORDERED TIMELINE (PHASE-2 STANDARD)
+  // TRUE PHASE-2 ORDER (SOURCE OF TRUTH FROM BACKEND)
   // ============================================================
   const timeline = [
     { key: "depositPaid", label: "Deposit Paid", icon: CreditCard },
-    { key: "buyerAccepted", label: "Buyer Accepted", icon: CheckCircle },
-    { key: "sellerAccepted", label: "Seller Accepted", icon: CheckCircle },
     { key: "preparingDelivery", label: "Preparing Delivery", icon: Package },
+    {
+      key: "sellerScheduledPickup",
+      label: "Seller Scheduled Pickup",
+      icon: Clock,
+    },
     { key: "inTransit", label: "In Transit", icon: Truck },
     { key: "delivered", label: "Delivered", icon: CheckCircle },
+    {
+      key: "completionCheck",
+      label: "Awaiting Both Parties Confirmation",
+      icon: Clock,
+    },
     { key: "sold", label: "Completed (Sold)", icon: CheckCircle },
   ];
 
   // ============================================================
-  // CANCELLATION / FAILURE STATES
+  // CANCELLED / DECLINED STATES
   // ============================================================
-  const cancelledStates = ["buyerDeclined", "cancelled", "autoClosed"];
-
-  const currentIndex = timeline.findIndex((s) => s.key === currentStatus);
+  const cancelledStates = [
+    "buyerDeclined",
+    "buyerDeclinedAtDoor", // ⭐ NEW
+    "cancelled",
+    "autoClosed",
+  ];
 
   const isCancelled = cancelledStates.includes(currentStatus);
+
+  const currentIndex = timeline.findIndex((s) => s.key === currentStatus);
 
   return (
     <div className="mt-4 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
@@ -49,8 +64,8 @@ export default function PremiumTimeline({ currentStatus }) {
         <div className="absolute left-3 top-0 bottom-0 w-[2px] bg-gray-200"></div>
 
         {/* ============================================================
-         * CANCELLED / FAILED SECTION
-         * ========================================================== */}
+         * CANCELLED SECTION
+         * ============================================================ */}
         {isCancelled && (
           <div className="flex items-start mb-4 relative">
             <div className="flex items-center justify-center w-6 h-6 rounded-full border-2 bg-red-600 border-red-600 text-white">
@@ -62,7 +77,7 @@ export default function PremiumTimeline({ currentStatus }) {
                 Purchase Cancelled
               </p>
               <p className="text-xs text-gray-500">
-                This premium purchase was cancelled or declined.
+                This premium order was cancelled or declined.
               </p>
             </div>
           </div>
@@ -70,21 +85,26 @@ export default function PremiumTimeline({ currentStatus }) {
 
         {/* ============================================================
          * NORMAL TIMELINE STEPS
-         * ========================================================== */}
+         * ============================================================ */}
         {timeline.map((step) => {
           const Icon = step.icon;
 
           let completed = false;
 
+          // When fully sold → everything completed
           if (currentStatus === "sold") {
-            completed = true; // mark all as completed for sold
+            completed = true;
           } else if (!isCancelled) {
             const stepIndex = timeline.findIndex((s) => s.key === step.key);
+
             completed =
-              currentIndex !== -1 &&
-              stepIndex !== -1 &&
-              stepIndex <= currentIndex;
+              currentIndex !== -1 && stepIndex !== -1 && stepIndex < currentIndex;
           }
+
+          const isCurrent =
+            !isCancelled &&
+            currentIndex !== -1 &&
+            step.key === timeline[currentIndex]?.key;
 
           return (
             <div key={step.key} className="flex items-start mb-4 relative">
@@ -94,6 +114,8 @@ export default function PremiumTimeline({ currentStatus }) {
                   ${
                     completed
                       ? "bg-blue-600 border-blue-600 text-white"
+                      : isCurrent
+                      ? "bg-blue-200 border-blue-400 text-blue-700"
                       : "bg-white border-gray-300 text-gray-400"
                   }`}
               >
@@ -104,7 +126,11 @@ export default function PremiumTimeline({ currentStatus }) {
               <div className="ml-3">
                 <p
                   className={`text-sm font-medium ${
-                    completed ? "text-gray-900" : "text-gray-500"
+                    completed
+                      ? "text-gray-900"
+                      : isCurrent
+                      ? "text-blue-700"
+                      : "text-gray-500"
                   }`}
                 >
                   {step.label}

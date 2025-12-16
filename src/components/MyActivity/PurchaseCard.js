@@ -1,199 +1,227 @@
-// =============================================================
-// FILE: PurchaseCard.js (PHASE-2 — FINAL STABLE PATCH v3)
-// Premium Buyer Activity Card — Uses donations.images ALWAYS
-// =============================================================
+// ======================================================================
+// FILE: PurchaseCard.jsx — PHASE-2 FINAL PREMIUM PURCHASE CARD
+// Premium items ONLY — Strict delivery pipeline
+// Mobile-first, drawer-safe, buyer-only actions
+// ======================================================================
 
 import React from "react";
-import { Eye, Trash2 } from "lucide-react";
+import { motion } from "framer-motion";
+import { Eye, Trash2, XCircle, CheckCircle, Clock } from "lucide-react";
 
-// Premium delivery lock stages (cannot delete)
-const DELIVERY_LOCK = [
-  "depositPaid",
-  "sellerAccepted",
-  "preparingDelivery",
-  "inTransit",
+// PREMIUM DELIVERY STATES
+const LOCKED = [
+  "depositpaid",
+  "preparingdelivery",
+  "sellerscheduledpickup",
+  "intransit",
   "delivered",
-  "sold",
+  "completioncheck",
 ];
 
-// Allowed delete statuses (your confirmed rules)
-const ALLOW_DELETE = ["cancelled", "completed", "rejected", "available"];
+// DELETABLE AFTER COMPLETION
+const ALLOW_DELETE = ["completed", "sold", "cancelled", "rejected"];
+
+// STATUS MAP
+const STATUS = {
+  available: {
+    badge: "Available",
+    color: "bg-gray-200 text-gray-700",
+  },
+
+  depositpaid: {
+    badge: "Deposit Paid",
+    color: "bg-amber-500 text-white",
+  },
+
+  preparingdelivery: {
+    badge: "Preparing Delivery",
+    color: "bg-indigo-600 text-white",
+  },
+
+  sellerscheduledpickup: {
+    badge: "Pickup Scheduled",
+    color: "bg-purple-700 text-white",
+  },
+
+  intransit: {
+    badge: "In Transit",
+    color: "bg-blue-600 text-white",
+  },
+
+  delivered: {
+    badge: "Delivered",
+    color: "bg-green-600 text-white",
+  },
+
+  completioncheck: {
+    badge: "Completion Check",
+    color: "bg-green-800 text-white",
+  },
+
+  completed: {
+    badge: "Completed",
+    color: "bg-gray-700 text-white",
+  },
+
+  cancelled: {
+    badge: "Cancelled",
+    color: "bg-red-600 text-white",
+  },
+
+  rejected: {
+    badge: "Payment Rejected",
+    color: "bg-red-500 text-white",
+  },
+
+  buyerdeclined: {
+    badge: "Declined by Buyer",
+    color: "bg-red-500 text-white",
+  },
+
+  buyerdeclinedatdoor: {
+    badge: "Declined At Door",
+    color: "bg-red-700 text-white",
+  },
+
+  unknown: {
+    badge: "Processing",
+    color: "bg-gray-500 text-white",
+  },
+};
 
 export default function PurchaseCard({
   item,
   onView,
   onDelete,
+  onPremiumAction,
   loading,
-  statusConfig = {},
 }) {
   if (!item) return null;
 
-  // ============================================================
-  // 🔥 ABSOLUTE FIX — USE donation.images AS THE ONLY SOURCE
-  // ============================================================
-  const donation = item?.donation || {}; // Hydrated in MyActivity
+  const donation = item.donation || {};
+  const delivery = item.delivery || {};
 
-  const images = donation.images || [];
-  const safeImage =
-    images.length > 0 ? images[0] : "/images/default-item.jpg";
+  if (donation.type !== "premium") return null; // NEVER show free items here
 
-  const safeTitle =
-    donation.title || item.itemTitle || "Premium Item";
+  const premiumStatus = (item.premiumStatus || "unknown")
+    .toLowerCase()
+    .replace(/[-_]/g, "");
 
-  const price =
-    donation.price || item.itemPriceJPY || null;
+  const status = STATUS[premiumStatus] || STATUS.unknown;
 
-  const premiumStatus = item.premiumStatus || "unknown";
+  // IMAGE
+  const img =
+    donation.images?.[0] ||
+    item.itemImage ||
+    "/images/default-item.jpg";
 
-  // ============================================================
-  // FINAL DELETE LOGIC (Phase-2 Confirmed)
-  // ============================================================
+  // BUYER CONFIRM DELIVERY
+  const canBuyerConfirm =
+    premiumStatus === "delivered" ||
+    premiumStatus === "completioncheck";
+
+  // DECLINE AT DOOR (only allowed in "delivered")
+  const canDeclineAtDoor =
+    premiumStatus === "delivered";
+
+  // DELETE PERMISSION
   const canDelete =
-    !DELIVERY_LOCK.includes(premiumStatus) &&
-    ALLOW_DELETE.includes(premiumStatus);
+    ALLOW_DELETE.includes(premiumStatus) &&
+    !LOCKED.includes(premiumStatus);
 
-  // ============================================================
-  // Premium Status → Badge + Description
-  // ============================================================
-  const PREMIUM_STATUS_MAP = {
-    available: {
-      badge: "Available",
-      color: "bg-gray-200 text-gray-700",
-      msg: null,
-    },
-    depositPaid: {
-      badge: "Deposit Paid",
-      color: "bg-amber-600 text-white",
-      msg: "⏳ Seller preparing your item",
-    },
-    sellerAccepted: {
-      badge: "Accepted",
-      color: "bg-blue-600 text-white",
-      msg: "📦 Seller accepted your purchase",
-    },
-    preparingDelivery: {
-      badge: "Preparing",
-      color: "bg-indigo-600 text-white",
-      msg: "🔧 Preparing item for dispatch",
-    },
-    inTransit: {
-      badge: "In Transit",
-      color: "bg-purple-600 text-white",
-      msg: "🚚 Item is on the way",
-    },
-    delivered: {
-      badge: "Delivered",
-      color: "bg-green-600 text-white",
-      msg: "✅ Delivered successfully",
-    },
-    sold: {
-      badge: "Completed",
-      color: "bg-gray-700 text-white",
-      msg: "🎉 Transaction complete",
-    },
-    cancelled: {
-      badge: "Cancelled",
-      color: "bg-red-600 text-white",
-      msg: "❌ Purchase was cancelled",
-    },
-    rejected: {
-      badge: "Rejected",
-      color: "bg-red-500 text-white",
-      msg: "⚠️ Payment was rejected",
-    },
-    completed: {
-      badge: "Completed",
-      color: "bg-green-700 text-white",
-      msg: "🎉 Order completed",
-    },
-    unknown: {
-      badge: "Processing",
-      color: "bg-gray-500 text-white",
-      msg: "Processing your order",
-    },
+  const safeClick = (e) => {
+    if (e.target.closest(".action-btn")) return;
+    onView(item);
   };
 
-  const status =
-    PREMIUM_STATUS_MAP[premiumStatus] || PREMIUM_STATUS_MAP.unknown;
-
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+    <motion.div
+      initial={{ opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      onClick={safeClick}
+      className="bg-white rounded-xl border border-gray-200 shadow hover:shadow-md cursor-pointer transition relative"
+    >
+      {/* STATUS BADGE */}
+      <div className="absolute top-3 left-3 px-2 py-1 text-xs rounded-full font-semibold shadow z-20 flex items-center gap-1">
+        <span className={status.color}>{status.badge}</span>
+      </div>
+
+      {/* IMAGE */}
+      <div className="w-full h-44 bg-gray-200 overflow-hidden rounded-t-xl">
+        <img
+          src={img}
+          alt={donation.title}
+          onError={(e) => (e.target.src = "/images/default-item.jpg")}
+          className="w-full h-full object-cover hover:scale-105 transition duration-300"
+        />
+      </div>
+
+      {/* BODY */}
       <div className="p-4">
+        <h3 className="line-clamp-2 font-semibold text-gray-900 text-base mb-2">
+          {donation.title || "Premium Item"}
+        </h3>
 
-        {/* ====================== HEADER ====================== */}
-        <div className="flex justify-between items-start mb-3">
-          <div className="flex-1">
-            <h3 className="font-semibold text-gray-900 line-clamp-2 mb-1">
-              {safeTitle}
-            </h3>
+        <p className="text-sm text-indigo-700 font-semibold">
+          ¥{(donation.price || 0).toLocaleString()}
+        </p>
 
-            <div className="flex items-center gap-2">
-              <span
-                className={`text-xs px-2 py-1 rounded-full font-medium ${status.color}`}
-              >
-                {status.badge}
-              </span>
-
-              <span className="text-xs px-2 py-1 rounded-full bg-indigo-600 text-white">
-                Premium
-              </span>
-            </div>
-          </div>
-
-          {/* Thumbnail */}
-          <img
-            src={safeImage}
-            alt={safeTitle}
-            className="w-16 h-16 ml-2 rounded-lg object-cover shadow-sm"
-            onClick={() => onView(item)}
-            onError={(e) => (e.target.src = "/images/default-item.jpg")}
-          />
-        </div>
-
-        {/* ====================== PRICE ====================== */}
-        {price && (
-          <div className="flex justify-between text-sm text-gray-700 mb-2">
-            <span>Price:</span>
-            <span className="font-semibold text-indigo-700">
-              ¥{price.toLocaleString()}
-            </span>
-          </div>
-        )}
-
-        {/* ====================== STATUS MESSAGE ====================== */}
-        {status.msg && (
-          <p className="text-xs bg-gray-50 text-gray-700 px-2 py-1 rounded">
-            {status.msg}
+        {/* STATUS MESSAGE */}
+        {STATUS[premiumStatus]?.msg && (
+          <p className="mt-2 text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded">
+            {STATUS[premiumStatus].msg}
           </p>
         )}
 
-        {/* ====================== ACTIONS ====================== */}
-        <div className="flex justify-between items-center mt-4">
+        {/* ACTIONS */}
+        <div className="mt-4 space-y-2">
 
-          <button
-            onClick={() => onView(item)}
-            className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-sm font-medium"
-          >
-            <Eye size={16} />
-            View Details
-          </button>
+          {/* BUYER CONFIRM DELIVERY */}
+          {canBuyerConfirm && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onPremiumAction("buyer_confirm_delivery");
+              }}
+              disabled={loading}
+              className="w-full py-2 bg-green-600 text-white rounded-lg shadow hover:bg-green-700 transition action-btn"
+            >
+              <CheckCircle size={16} className="inline mr-2" />
+              Confirm Delivery
+            </button>
+          )}
 
-          <button
-            onClick={() => onDelete(item)}
-            disabled={loading || !canDelete}
-            className={`p-1.5 rounded-full transition-colors ${
-              canDelete
-                ? "hover:bg-red-50 hover:text-red-600 text-gray-500"
-                : "opacity-40 cursor-not-allowed text-gray-400"
-            }`}
-            title={
-              canDelete ? "Delete record" : "Cannot delete during delivery"
-            }
-          >
-            <Trash2 size={16} />
-          </button>
+          {/* DECLINE AT DOOR */}
+          {canDeclineAtDoor && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onPremiumAction("buyer_decline_at_door");
+              }}
+              disabled={loading}
+              className="w-full py-2 bg-red-600 text-white rounded-lg shadow hover:bg-red-700 transition action-btn"
+            >
+              <XCircle size={16} className="inline mr-2" />
+              Decline at Door
+            </button>
+          )}
+
+          {/* DELETE */}
+          {canDelete && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(item);
+              }}
+              disabled={loading}
+              className="w-full py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition action-btn flex justify-center"
+            >
+              <Trash2 size={16} className="mr-2" />
+              Remove
+            </button>
+          )}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

@@ -1,4 +1,5 @@
-// ✅ FILE: src/pages/AdminPickups.js (CLEAN, FULLY PATCHED)
+// ✅ FILE: src/pages/AdminPickups.js (PHASE-2 COMPLETE + ITEM TITLE FIXED)
+
 import React, { useState, useEffect, useMemo } from "react";
 import {
   collection,
@@ -7,7 +8,6 @@ import {
   query,
   updateDoc,
   doc,
-  where,
   getDoc,
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -16,10 +16,8 @@ import { useAuth } from "../contexts/AuthContext";
 import toast from "react-hot-toast";
 import { Link } from "react-router-dom";
 import { checkAdminStatus } from "../utils/adminUtils";
+
 import {
-  CheckCircle,
-  XCircle,
-  Truck,
   Search,
   Menu,
   X,
@@ -31,16 +29,20 @@ import {
   ClipboardCopy,
   Clock,
   Calendar,
-  Filter,
   MapPin,
   Phone,
   MessageSquare,
   User,
+  Truck,
   Shield,
 } from "lucide-react";
 
+
+// =============================================================
+// MAIN COMPONENT
+// =============================================================
 export default function AdminPickups() {
-  const { isAdmin, isAuthenticated, currentUser } = useAuth();
+  const { isAuthenticated, currentUser } = useAuth();
 
   const [pickups, setPickups] = useState([]);
   const [requests, setRequests] = useState([]);
@@ -51,73 +53,67 @@ export default function AdminPickups() {
   const [updating, setUpdating] = useState({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [lastSync, setLastSync] = useState(null);
-  const [activeView, setActiveView] = useState("pickups");
+  const [activeView, setActiveView] = useState("deliveries");
   const [permissionError, setPermissionError] = useState(false);
 
   const [callableFunctions, setCallableFunctions] = useState({
     sendStatusUpdate: null,
-    triggerShipment: null,
   });
 
-  // Initialize callable functions
+
+  // -------------------------------------------------------------
+  // INIT FIREBASE FUNCTIONS
+  // -------------------------------------------------------------
   useEffect(() => {
     const functions = getFunctions();
     setCallableFunctions({
       sendStatusUpdate: httpsCallable(functions, "sendStatusUpdate"),
-      triggerShipment: httpsCallable(functions, "triggerShipment"),
     });
   }, []);
 
-  // Check admin access
+
+  // -------------------------------------------------------------
+  // CHECK ADMIN ACCESS
+  // -------------------------------------------------------------
   useEffect(() => {
     if (!isAuthenticated) return;
 
     const checkAccess = async () => {
-      try {
-        const adminStatus = await checkAdminStatus(currentUser);
-        if (!adminStatus) {
-          setPermissionError(true);
-          setLoading(false);
-          return;
-        }
-        loadData();
-      } catch (err) {
-        console.error(err);
+      const ok = await checkAdminStatus(currentUser);
+      if (!ok) {
         setPermissionError(true);
         setLoading(false);
+        return;
       }
+      loadData();
     };
 
     checkAccess();
   }, [isAuthenticated, currentUser]);
 
-  // Load data
+
+  // -------------------------------------------------------------
+  // LOAD PICKUPS + DELIVERY REQUESTS
+  // -------------------------------------------------------------
   const loadData = () => {
     setLoading(true);
 
-    // 📦 Pickups
-    const pickupsQuery = query(
+    // ---------- PICKUPS ----------
+    const pickupQuery = query(
       collection(db, "pickups"),
       orderBy("createdAt", "desc")
     );
 
     const unsubPickups = onSnapshot(
-      pickupsQuery,
+      pickupQuery,
       (snap) => {
-        setPickups(
-          snap.docs.map((d) => ({
-            id: d.id,
-            ...d.data(),
-          }))
-        );
+        setPickups(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
       },
-      (err) => {
-        console.error(err);
-        toast.error("Failed to load pickups");
-      }
+      () => toast.error("Failed to load pickups")
     );
 
-    // 🚚 Delivery Requests
+
+    // ---------- DELIVERY REQUESTS ----------
     const deliveryQuery = query(
       collection(db, "deliveryDetails"),
       orderBy("createdAt", "desc")
@@ -125,43 +121,74 @@ export default function AdminPickups() {
 
     const unsubDelivery = onSnapshot(
       deliveryQuery,
-      (snap) => {
-        const arr = snap.docs.map((d) => {
+      async (snap) => {
+        let arr = snap.docs.map((d) => {
           const data = d.data();
+          const addressInfo = data.addressInfo || {};
 
           return {
             id: d.id,
             ...data,
 
-            // FIXED FIELD MAPPING
-            deliveryAddress: data.deliveryAddress || "",
-            deliveryPhone: data.deliveryPhone || "",
-            deliveryInstructions: data.deliveryInstructions || "",
+            // ADDRESS
+            deliveryAddress: addressInfo.address || "—",
+            deliveryPhone: addressInfo.phone || "—",
+            deliveryZip: addressInfo.zipCode || "—",
+            deliveryInstructions: addressInfo.instructions || "",
+
+            // USER FIELDS (WILL BE POPULATED)
+            userId: data.userId || null,
+            userEmail: null,
+            userName: null,
+
+            // ITEM FIELDS (FETCHED LATER)
+            itemId: data.itemId || null,
+            itemData: { title: "Loading item…" },
 
             status: data.status || "accepted",
             deliveryStatus: data.deliveryStatus || "accepted",
 
-            itemData: {
-              title: data.itemTitle || "Unknown item",
-            },
-
-            // timestamps
             createdAt: data.createdAt,
             updatedAt: data.updatedAt,
-
-            isLegacy: !data.deliveryAddress,
           };
         });
+
+
+        // ---------------------------------------------------------
+        // 1️⃣ FETCH USER DATA (Name + Email)
+        // ---------------------------------------------------------
+        for (let r of arr) {
+          if (!r.userId) continue;
+
+          const userSnap = await getDoc(doc(db, "users", r.userId));
+          if (userSnap.exists()) {
+            const u = userSnap.data();
+            r.userName = u.displayName || null;
+            r.userEmail = u.email || null;
+          }
+        }
+
+        // ---------------------------------------------------------
+        // 2️⃣ FETCH ITEM TITLE FROM donations/{itemId}
+        // ---------------------------------------------------------
+        for (let r of arr) {
+          if (!r.itemId) continue;
+
+          const itemSnap = await getDoc(doc(db, "donations", r.itemId));
+          if (itemSnap.exists()) {
+            r.itemData = {
+              title: itemSnap.data().title || "Untitled Item",
+            };
+          } else {
+            r.itemData = { title: "Unknown item" };
+          }
+        }
 
         setRequests(arr);
         setLastSync(new Date());
         setLoading(false);
       },
-      (err) => {
-        console.error(err);
-        toast.error("Failed to load delivery requests");
-        setLoading(false);
-      }
+      () => toast.error("Failed to load delivery requests")
     );
 
     return () => {
@@ -170,7 +197,10 @@ export default function AdminPickups() {
     };
   };
 
-  // Helpers
+
+  // -------------------------------------------------------------
+  // HELPERS
+  // -------------------------------------------------------------
   const formatDate = (v) => {
     if (!v) return "—";
     const d = v.seconds ? new Date(v.seconds * 1000) : new Date(v);
@@ -182,74 +212,42 @@ export default function AdminPickups() {
     });
   };
 
-  const formatTimeAgo = (v) => {
-    if (!v) return "—";
-    const d = v.seconds ? new Date(v.seconds * 1000) : new Date(v);
-
-    const diff = Date.now() - d.getTime();
-    const mins = Math.floor(diff / 60000);
-    const hrs = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-
-    if (mins < 1) return "Just now";
-    if (mins < 60) return `${mins}m ago`;
-    if (hrs < 24) return `${hrs}h ago`;
-    if (days < 7) return `${days}d ago`;
-
-    return formatDate(v);
+  const copyToClipboard = (text) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    toast.success("Copied!");
   };
 
-  const sendStatusNotification = async (email, status, title, type) => {
-    if (!callableFunctions.sendStatusUpdate) return;
+
+  // -------------------------------------------------------------
+  // UPDATE DELIVERY STATUS
+  // -------------------------------------------------------------
+  const handleUpdateDelivery = async (req, newStatus) => {
+    if (!window.confirm(`Change status to "${newStatus}"?`)) return;
+
+    setUpdating((p) => ({ ...p, [req.id]: true }));
+
     try {
-      await callableFunctions.sendStatusUpdate({
-        userEmail: email,
-        status,
-        itemTitle: title,
-        notificationType: type,
-      });
-    } catch (err) {
-      console.error(err);
+      const updates = { deliveryStatus: newStatus, updatedAt: new Date() };
+
+      await updateDoc(doc(db, "deliveryDetails", req.id), updates);
+      await updateDoc(doc(db, "requests", req.id), updates);
+
+      toast.success("Delivery updated");
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed");
     }
+
+    setUpdating((p) => ({ ...p, [req.id]: false }));
   };
 
-  // Update delivery status
- const handleUpdateDelivery = async (req, newStatus) => {
-  if (!window.confirm(`Set status to "${newStatus}"?`)) return;
 
-  setUpdating((p) => ({ ...p, [req.id]: true }));
-
-  try {
-    const updates = {
-      deliveryStatus: newStatus,
-      updatedAt: new Date(),
-    };
-
-    await updateDoc(doc(db, "deliveryDetails", req.id), updates);
-
-    // Mirror to request (optional but recommended)
-    await updateDoc(doc(db, "requests", req.id), updates);
-
-    await sendStatusNotification(
-      req.userEmail,
-      newStatus,
-      req.itemData?.title,
-      "delivery_update"
-    );
-
-    toast.success("Delivery status updated");
-  } catch (err) {
-    console.error(err);
-    toast.error("Failed to update");
-  }
-
-  setUpdating((p) => ({ ...p, [req.id]: false }));
-};
-
-
-  // Update pickup
+  // -------------------------------------------------------------
+  // UPDATE PICKUP STATUS
+  // -------------------------------------------------------------
   const handleUpdatePickup = async (pickup, newStatus) => {
-    if (!window.confirm(`Set pickup as "${newStatus}"?`)) return;
+    if (!window.confirm(`Mark pickup as "${newStatus}"?`)) return;
 
     setUpdating((p) => ({ ...p, [pickup.id]: true }));
 
@@ -260,71 +258,50 @@ export default function AdminPickups() {
       });
 
       toast.success("Pickup updated");
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to update pickup");
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed");
     }
 
     setUpdating((p) => ({ ...p, [pickup.id]: false }));
   };
 
-  // Filter + search + sort
- const filteredData = useMemo(() => {
-  const src = activeView === "pickups" ? pickups : requests;
 
-  // ❌ Hide completed deliveries
-  let list = src.filter(
-    (i) => i.deliveryStatus !== "completed" && i.status !== "completed"
-  );
+  // -------------------------------------------------------------
+  // FILTER RESULTS
+  // -------------------------------------------------------------
+  const filteredData = useMemo(() => {
+    const src = activeView === "pickups" ? pickups : requests;
 
-  if (filter) {
-    list = list.filter((i) => {
-      return (
-        i.deliveryStatus === filter ||
-        i.status === filter
-      );
-    });
-  }
-
-  if (search.trim()) {
-    const s = search.toLowerCase();
-    list = list.filter(
-      (i) =>
-        i.userEmail?.toLowerCase().includes(s) ||
-        i.deliveryAddress?.toLowerCase().includes(s) ||
-        i.deliveryPhone?.toLowerCase().includes(s) ||
-        i.itemData?.title?.toLowerCase().includes(s)
+    let list = src.filter(
+      (i) => i.deliveryStatus !== "completed" && i.status !== "completed"
     );
-  }
 
-  return list;
-}, [requests, pickups, filter, search, activeView]);
+    if (filter) {
+      list = list.filter(
+        (i) => i.deliveryStatus === filter || i.status === filter
+      );
+    }
+
+    if (search.trim()) {
+      const s = search.toLowerCase();
+      list = list.filter(
+        (i) =>
+          i.userEmail?.toLowerCase().includes(s) ||
+          i.userName?.toLowerCase().includes(s) ||
+          i.deliveryAddress?.toLowerCase().includes(s) ||
+          i.deliveryPhone?.toLowerCase().includes(s) ||
+          i.itemData?.title?.toLowerCase().includes(s)
+      );
+    }
+
+    return list;
+  }, [pickups, requests, filter, search, activeView]);
 
 
-// ADD HERE
-const copyToClipboard = (text) => {
-  if (!text) return;
-  navigator.clipboard.writeText(text);
-  toast.success("Copied to clipboard!");
-};
-
-const getDeliveryStatusColor = (status) => {
-  switch (status) {
-    case "accepted":
-      return "bg-blue-100 text-blue-700";
-    case "pickup_scheduled":
-      return "bg-orange-100 text-orange-700";
-    case "delivered":
-    case "completed":
-      return "bg-green-100 text-green-700";
-    case "cancelled":
-      return "bg-red-100 text-red-700";
-    default:
-      return "bg-gray-100 text-gray-700";
-  }
-};
-
-  // UI RENDER
+  // -------------------------------------------------------------
+  // UI STATES
+  // -------------------------------------------------------------
   if (loading)
     return (
       <div className="flex justify-center items-center min-h-screen text-gray-600">
@@ -341,16 +318,18 @@ const getDeliveryStatusColor = (status) => {
       </div>
     );
 
-  const isEmpty =
-    activeView === "pickups" ? pickups.length === 0 : requests.length === 0;
 
+  // =============================================================
+  // RENDER UI
+  // =============================================================
   return (
     <div className="flex min-h-screen bg-gray-100 text-gray-800">
-      {/* Sidebar */}
+
+      {/* SIDEBAR */}
       <aside
-        className={`${
-          sidebarOpen ? "w-64" : "w-0"
-        } bg-gradient-to-b from-indigo-900 via-blue-900 to-purple-900 text-white transition-all duration-300 overflow-hidden`}
+        className={`${sidebarOpen ? "w-64" : "w-0"}
+        bg-gradient-to-b from-indigo-900 via-blue-900 to-purple-900
+        text-white transition-all duration-300 overflow-hidden`}
       >
         <div className="flex justify-between items-center px-4 py-3 border-b border-white/20">
           <h2 className="text-lg font-bold">Admin Panel</h2>
@@ -375,15 +354,14 @@ const getDeliveryStatusColor = (status) => {
         </nav>
       </aside>
 
+
       {/* MAIN CONTENT */}
       <main className="flex-1">
-        {/* Header */}
+
+        {/* HEADER */}
         <header className="flex items-center justify-between bg-white shadow px-6 py-4 border-b">
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="md:hidden text-gray-600"
-            >
+            <button onClick={() => setSidebarOpen(true)} className="md:hidden text-gray-600">
               <Menu size={20} />
             </button>
 
@@ -397,25 +375,23 @@ const getDeliveryStatusColor = (status) => {
           </div>
 
           <div className="flex items-center gap-3 text-xs text-gray-500">
-            <div className="flex items-center gap-1">
-              <Clock size={12} /> Last Sync:{" "}
-              <span className="font-medium text-gray-700">
-                {lastSync?.toLocaleTimeString() || "—"}
-              </span>
-            </div>
-
+            <Clock size={12} /> Last Sync:
+            <span className="font-medium text-gray-700">
+              {lastSync?.toLocaleTimeString() || "—"}
+            </span>
             <button
               onClick={() => window.location.reload()}
-              className="flex items-center gap-1 bg-gray-200 text-gray-800 px-3 py-1 rounded hover:bg-gray-300"
+              className="flex items-center gap-1 bg-gray-200 px-3 py-1 rounded hover:bg-gray-300"
             >
               <RefreshCcw size={12} /> Refresh
             </button>
           </div>
         </header>
 
-        {/* Toggle & Stats */}
+
+        {/* TOGGLE */}
         <section className="p-4 bg-white border-b">
-          <div className="flex gap-2 mb-4">
+          <div className="flex gap-2">
             <button
               onClick={() => setActiveView("pickups")}
               className={`px-4 py-2 rounded-lg font-medium ${
@@ -440,141 +416,86 @@ const getDeliveryStatusColor = (status) => {
           </div>
         </section>
 
-        {/* Empty State */}
-        {isEmpty ? (
-          <div className="text-center my-20 text-gray-600">
-            <Truck className="text-gray-400 mx-auto mb-3" size={50} />
-            <h2 className="text-lg font-semibold">
-              No {activeView === "pickups" ? "pickup" : "delivery"} records
-            </h2>
-            <p className="text-sm max-w-xs mx-auto mt-2 text-gray-500">
-              Records will appear here when users accept items or pickups are
-              scheduled.
-            </p>
-          </div>
-        ) : (
-          <section className="p-8">
-            <div className="bg-white rounded-lg shadow p-6 border border-gray-200">
-              {/* Search/filter */}
-              <div className="flex items-center gap-3 mb-6">
-                <div className="relative">
-                  <Search className="absolute left-2 top-2.5 text-gray-400" size={16} />
-                  <input
-                    type="text"
-                    placeholder={
-                      activeView === "pickups"
-                        ? "Search courier or tracking"
-                        : "Search email, phone, or item"
-                    }
-                    className="border pl-8 pr-3 py-2 rounded-md text-sm"
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-                </div>
 
-                <select
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                  className="border px-3 py-2 text-sm rounded"
-                >
-                  <option value="">All</option>
-                  {activeView === "pickups" ? (
-                    <>
-                      <option value="scheduled">Scheduled</option>
-                      <option value="completed">Completed</option>
-                      <option value="cancelled">Cancelled</option>
-                    </>
-                  ) : (
-                    <>
-                      <option value="accepted">Accepted</option>
-                      <option value="scheduled">Pickup Scheduled</option>
-                      <option value="delivered">Delivered</option>
-                    </>
-                  )}
-                </select>
-              </div>
+        {/* DATA LIST */}
+        <section className="p-8">
+          <div className="bg-white rounded-lg shadow p-6 border">
 
-              {/* Data list */}
-              <div className="grid gap-4">
-                {filteredData.map((item) => {
-                  return (
-                    <div
-                      key={item.id}
-                      className="border rounded-xl bg-white p-4 shadow-sm flex flex-col sm:flex-row justify-between gap-4"
-                    >
-                      {activeView === "pickups" ? (
-                        <PickupItem
-                          pickup={item}
-                          onUpdate={handleUpdatePickup}
-                          updating={updating[item.id]}
-                          formatDate={formatDate}
-                          formatTimeAgo={formatTimeAgo}
-                        />
-                      ) : (
-                        <DeliveryItem
-                          request={item}
-                          onUpdate={handleUpdateDelivery}
-                          updating={updating[item.id]}
-                          formatDate={formatDate}
-                          formatTimeAgo={formatTimeAgo}
-                          copyToClipboard={copyToClipboard}   
-                          getStatusColor={getDeliveryStatusColor}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+            <div className="relative mb-6">
+              <Search className="absolute left-3 top-3 text-gray-400" size={16} />
+              <input
+                type="text"
+                placeholder="Search email, phone, item, name…"
+                className="border pl-10 pr-3 py-2 rounded-md text-sm w-full"
+                onChange={(e) => setSearch(e.target.value)}
+              />
             </div>
-          </section>
-        )}
+
+            <div className="grid gap-4">
+              {filteredData.map((item) => (
+                <DeliveryItem
+                  key={item.id}
+                  request={item}
+                  updating={updating[item.id]}
+                  onUpdate={handleUpdateDelivery}
+                  formatDate={formatDate}
+                  copyToClipboard={copyToClipboard}
+                />
+              ))}
+            </div>
+
+          </div>
+        </section>
+
       </main>
     </div>
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*                               Sub Components                               */
-/* -------------------------------------------------------------------------- */
 
+// =============================================================
+// DELIVERY ITEM COMPONENT
+// =============================================================
 const DeliveryItem = ({
   request,
   onUpdate,
   updating,
   formatDate,
-  formatTimeAgo,
-  copyToClipboard,          // ← ADD THIS
-  getStatusColor,           // ← ADD THIS
+  copyToClipboard,
 }) => {
+  const displayUser =
+    request.userName || request.userEmail || "Unknown User";
 
   return (
-    <>
+    <div className="border rounded-xl bg-white p-4 shadow-sm flex flex-col sm:flex-row justify-between gap-4">
       <div className="flex-1">
+
+        {/* ITEM */}
         <p className="font-medium text-gray-800">
           Item:{" "}
-          <span className="text-indigo-700">
-            {request.itemData?.title || "Unknown Item"}
-          </span>
+          <span className="text-indigo-700">{request.itemData?.title}</span>
         </p>
 
-        <div className="mt-2 text-sm text-gray-600 space-y-2">
-
-          {/* USER EMAIL */}
+        {/* USER */}
+        <div className="mt-2 text-sm text-gray-700 space-y-2">
           <p className="flex items-center gap-1">
             <User size={14} />
-            <b>{request.userEmail}</b>
+            <b>{displayUser}</b>
           </p>
 
-          {/* ✅ PATCHED: FULL MULTILINE ADDRESS + COPY BUTTON */}
+          <p className="text-xs text-gray-500">User ID: {request.userId}</p>
+
+          {/* ADDRESS */}
           <div className="flex items-start gap-2">
             <MapPin size={14} className="mt-1 text-gray-500" />
             <div className="flex flex-col">
               <span
                 onClick={() => copyToClipboard(request.deliveryAddress)}
                 className="cursor-pointer whitespace-pre-wrap break-words leading-relaxed hover:text-indigo-600"
-                title="Click to copy full address"
               >
                 {request.deliveryAddress}
               </span>
+              <span className="text-xs text-gray-500">ZIP: {request.deliveryZip}</span>
 
               <button
                 onClick={() => copyToClipboard(request.deliveryAddress)}
@@ -586,11 +507,11 @@ const DeliveryItem = ({
           </div>
 
           {/* PHONE */}
-          <div className="flex items-start gap-2">
-            <Phone size={14} className="mt-1 text-gray-500" />
+          <div className="flex items-center gap-2">
+            <Phone size={14} className="text-gray-500" />
             <span
-              onClick={() => copyToClipboard(request.deliveryPhone)}
               className="cursor-pointer hover:text-indigo-600"
+              onClick={() => copyToClipboard(request.deliveryPhone)}
             >
               {request.deliveryPhone}
             </span>
@@ -599,163 +520,98 @@ const DeliveryItem = ({
           {/* INSTRUCTIONS */}
           {request.deliveryInstructions && (
             <div className="flex items-start gap-2">
-              <MessageSquare size={14} className="mt-1 text-gray-500" />
+              <MessageSquare size={14} className="text-gray-500" />
               <span className="whitespace-pre-wrap break-words leading-relaxed">
                 {request.deliveryInstructions}
               </span>
             </div>
           )}
+
+          {/* ITEM LINK */}
+          {request.itemId && (
+            <Link
+              to={`/admin/items?id=${request.itemId}`}
+              className="text-xs underline text-indigo-600 mt-1 inline-block"
+            >
+              View Item →
+            </Link>
+          )}
         </div>
 
-        <div className="mt-3 text-xs text-gray-400 space-y-1">
+        {/* TIMESTAMPS */}
+        <div className="mt-3 text-xs text-gray-500 space-y-1">
           <p className="flex items-center gap-1">
-            <Clock size={12} />
-            Accepted: {formatDate(request.createdAt)}
+            <Clock size={12} /> Accepted: {formatDate(request.createdAt)}
           </p>
           <p className="flex items-center gap-1">
-            <Calendar size={12} />
-            Updated: {formatDate(request.updatedAt)}
+            <Calendar size={12} /> Updated: {formatDate(request.updatedAt)}
           </p>
         </div>
 
-        {request.itemId && (
-          <Link
-            to={`/admin/items?id=${request.itemId}`}
-            className="text-xs underline text-indigo-600 mt-1 inline-block"
-          >
-            View Item →
-          </Link>
-        )}
       </div>
 
+
+      {/* ACTION BUTTONS */}
       <div className="flex items-center gap-2">
         <StatusBadge status={request.deliveryStatus} />
 
-        {/* Schedule */}
-       {/* 📦 User accepted → Admin must schedule pickup */}
-{request.deliveryStatus === "accepted" && (
-  <button
-    disabled={updating}
-    onClick={() => onUpdate(request, "pickup_scheduled")}
-    className="px-3 py-1 bg-orange-600 text-xs text-white rounded-full"
-  >
-    Schedule Pickup
-  </button>
-)}
-
-{/* 🚚 After pickup scheduled → Admin marks as in transit */}
-{request.deliveryStatus === "pickup_scheduled" && (
-  <button
-    disabled={updating}
-    onClick={() => onUpdate(request, "in_transit")}
-    className="px-3 py-1 bg-purple-600 text-xs text-white rounded-full"
-  >
-    Out for Delivery
-  </button>
-)}
-
-{/* 🎁 After in_transit → Admin marks delivered */}
-{request.deliveryStatus === "in_transit" && (
-  <button
-    disabled={updating}
-    onClick={() => onUpdate(request, "delivered")}
-    className="px-3 py-1 bg-green-600 text-xs text-white rounded-full"
-  >
-    Mark Delivered
-  </button>
-)}
-
-{/* 🏁 Delivered → Admin marks complete */}
-{request.deliveryStatus === "delivered" && (
-  <button
-    disabled={updating}
-    onClick={() => onUpdate(request, "completed")}
-    className="px-3 py-1 bg-blue-600 text-xs text-white rounded-full"
-  >
-    Complete
-  </button>
-)}
-
-      </div>
-    </>
-  );
-};
-
-const PickupItem = ({
-  pickup,
-  onUpdate,
-  updating,
-  formatDate,
-  formatTimeAgo,
-}) => {
-  return (
-    <>
-      <div className="flex-1">
-        <p className="font-medium text-gray-800">
-          Method:{" "}
-          <span className="text-indigo-700">{pickup.method || "—"}</span>
-        </p>
-
-        <div className="text-sm text-gray-600 mt-2 space-y-1">
-          {pickup.courierName && (
-            <p className="flex items-center gap-1">
-              <Package size={14} /> {pickup.courierName}
-            </p>
-          )}
-
-          {pickup.trackingId && (
-            <p className="flex items-center gap-1">
-              <ClipboardCopy size={14} />
-              {pickup.trackingId}
-            </p>
-          )}
-        </div>
-
-        <div className="text-xs text-gray-400 mt-3">
-          <p className="flex items-center gap-1">
-            <Clock size={12} /> {formatDate(pickup.createdAt)}
-          </p>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <StatusBadge status={pickup.status} />
-
-        {pickup.status === "scheduled" && (
+        {request.deliveryStatus === "accepted" && (
           <button
             disabled={updating}
-            onClick={() => onUpdate(pickup, "completed")}
+            onClick={() => onUpdate(request, "pickup_scheduled")}
+            className="px-3 py-1 bg-orange-600 text-xs text-white rounded-full"
+          >
+            Schedule Pickup
+          </button>
+        )}
+
+        {request.deliveryStatus === "pickup_scheduled" && (
+          <button
+            disabled={updating}
+            onClick={() => onUpdate(request, "in_transit")}
+            className="px-3 py-1 bg-purple-600 text-xs text-white rounded-full"
+          >
+            Out for Delivery
+          </button>
+        )}
+
+        {request.deliveryStatus === "in_transit" && (
+          <button
+            disabled={updating}
+            onClick={() => onUpdate(request, "delivered")}
             className="px-3 py-1 bg-green-600 text-xs text-white rounded-full"
+          >
+            Mark Delivered
+          </button>
+        )}
+
+        {request.deliveryStatus === "delivered" && (
+          <button
+            disabled={updating}
+            onClick={() => onUpdate(request, "completed")}
+            className="px-3 py-1 bg-blue-600 text-xs text-white rounded-full"
           >
             Complete
           </button>
         )}
-
-        {pickup.status === "scheduled" && (
-          <button
-            disabled={updating}
-            onClick={() => onUpdate(pickup, "cancelled")}
-            className="px-3 py-1 bg-rose-600 text-xs text-white rounded-full"
-          >
-            Cancel
-          </button>
-        )}
       </div>
-    </>
+    </div>
   );
 };
 
+
+// =============================================================
+// STATUS BADGE
+// =============================================================
 const StatusBadge = ({ status }) => {
   const colors = {
-  accepted: "bg-blue-100 text-blue-700",
-  pickup_scheduled: "bg-orange-100 text-orange-700",
-  in_transit: "bg-purple-100 text-purple-700",
-  delivered: "bg-green-100 text-green-700",
-  completed: "bg-green-200 text-green-800",
-  cancelled: "bg-red-100 text-red-700",
-  scheduled: "bg-yellow-100 text-yellow-700",
-};
-
+    accepted: "bg-blue-100 text-blue-700",
+    pickup_scheduled: "bg-orange-100 text-orange-700",
+    in_transit: "bg-purple-100 text-purple-700",
+    delivered: "bg-green-100 text-green-700",
+    completed: "bg-green-200 text-green-800",
+    cancelled: "bg-red-100 text-red-700",
+  };
 
   return (
     <span
