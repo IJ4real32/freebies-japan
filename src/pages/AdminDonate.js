@@ -1,22 +1,22 @@
 // ✅ FILE: src/pages/AdminDonate.js (FINAL — Mobile-First + AdminLayout UI + Responsive)
 import React, { useMemo, useState, useEffect } from "react";
 import {
-  addDoc,
-  collection,
-  serverTimestamp,
-  Timestamp,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { v4 as uuidv4 } from "uuid";
 import AdminLayout from "../components/Admin/AdminLayout"; // ⭐ NEW — unified admin wrapper
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { v4 as uuidv4 } from "uuid";
 
 /* ------------------------------------------------------
  * CONSTANTS
  * ------------------------------------------------------ */
+const functions = getFunctions(undefined, "asia-northeast1");
+
 const CATEGORIES = [
   { value: "", label: "Select Category" },
   { value: "furniture", label: "Furniture" },
@@ -193,105 +193,82 @@ export default function AdminDonate() {
    * SUBMIT HANDLER
    * ------------------------------------------------------ */
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!isAdmin || submitting) return;
+  e.preventDefault();
+  if (!isAdmin || submitting) return;
 
-    if (!currentUser) {
-      setErrorMsg("Please log in.");
-      return;
+  if (!currentUser) {
+    setErrorMsg("Please log in.");
+    return;
+  }
+
+  if (!canSubmit) {
+    setErrorMsg("Please complete all required fields.");
+    return;
+  }
+
+  setSubmitting(true);
+  setErrorMsg("");
+  setSuccessMsg("");
+
+  try {
+    // =====================================================
+    // 1️⃣ Create sponsored donation via backend (AUTHORITATIVE)
+    // =====================================================
+    const functions = getFunctions(undefined, "asia-northeast1");
+    const createSponsored = httpsCallable(
+      functions,
+      "adminCreateSponsoredDonation"
+    );
+
+    const res = await createSponsored({
+      title: form.title.trim(),
+      description: form.description.trim(),
+      durationHours: Number(form.durationHours),
+    });
+
+    const { donationId } = res.data || {};
+    if (!donationId) {
+      throw new Error("Failed to create sponsored donation.");
     }
 
-    if (!canSubmit) {
-      setErrorMsg("Please complete all required fields.");
-      return;
-    }
+    // =====================================================
+    // 2️⃣ Upload images (client-side is OK)
+    // =====================================================
+    const imageUrls = await uploadAll(donationId);
 
-    setSubmitting(true);
-    setErrorMsg("");
-    setSuccessMsg("");
-
-    try {
-      const donationId = uuidv4();
-      const imageUrls = await uploadAll(donationId);
-
-      const priceNumber = isPremium ? Number(form.price) : null;
-      const expiry = Timestamp.fromDate(
-        new Date(Date.now() + Number(form.durationHours) * 60 * 60 * 1000)
-      );
-
-      const donationData = {
-        donorType: "admin",
-        sponsoredBy: "admin", // 🔥 Firestore rule requirement
-        donorId: currentUser.uid,
-        donorEmail: currentUser.email,
-
-        title: form.title.trim(),
-        description: form.description.trim(),
-        category: form.category,
-        condition: form.condition,
-        delivery: form.delivery,
-        pickupLocation: form.pickupLocation.trim(),
-
-        size: form.size,
-        estimatedDelivery:
-          form.delivery !== "pickup"
-            ? {
-                min: Number(form.deliveryMin),
-                max: Number(form.deliveryMax),
-              }
-            : null,
-
-        pickupAddress: {
-          addressLine1: form.pickupLocation.trim(),
-          city: "Tokyo",
-          prefecture: "Tokyo",
-          postalCode: "150-0001",
-        },
-
-        type: form.type,
-        isPremium,
-        price: priceNumber,
-        currency: "JPY",
-
-        status: "sponsored",
-        isSponsored: true,
-        featured: true,
-
+    // =====================================================
+    // 3️⃣ Attach images to donation (safe admin merge)
+    // =====================================================
+    await setDoc(
+      doc(db, "donations", donationId),
+      {
         images: imageUrls,
-        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
 
-        durationHours: Number(form.durationHours),
-        expiryAt: expiry,
-        requestWindowEnd: expiry,
-        availabilityCycle: 1,
+    toast.success("🎉 Sponsored item created successfully!");
+    setSuccessMsg("Sponsored item created successfully.");
 
-        verified: true,
-        approved: true,
-      };
+    setTimeout(() => navigate("/admin"), 1200);
+  } catch (err) {
+    console.error("❌ Submit error:", err);
 
-      await addDoc(collection(db, "donations"), donationData);
-
-      toast.success("🎉 Sponsored item created successfully!");
-      setSuccessMsg("Sponsored item created successfully.");
-
-      setTimeout(() => navigate("/admin"), 1200);
-    } catch (err) {
-      console.error("❌ Submit error:", err);
-
-      if (err.code === "permission-denied") {
-        setErrorMsg(
-          "❌ Admin permissions required. Please ensure you're logged in as an administrator."
-        );
-        toast.error("Admin permissions required");
-      } else {
-        setErrorMsg(err?.message || "Error creating sponsored item.");
-        toast.error("Failed to create sponsored item");
-      }
-    } finally {
-      setSubmitting(false);
+    if (err?.code === "permission-denied") {
+      setErrorMsg(
+        "❌ Admin permissions required. Please ensure you're logged in as an administrator."
+      );
+      toast.error("Admin permissions required");
+    } else {
+      setErrorMsg(err?.message || "Error creating sponsored item.");
+      toast.error("Failed to create sponsored item");
     }
-  };
+  } finally {
+    setSubmitting(false);
+  }
+};
+
 
   /* ------------------------------------------------------
    * LOADING / DENIED

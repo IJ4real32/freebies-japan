@@ -20,14 +20,18 @@ export default function DonationModal({ open, onClose }) {
     accountHolder: "Freebies Japan",
   };
 
-  // prevent background scroll
+  /* --------------------------------------------------
+   * Prevent background scroll
+   * -------------------------------------------------- */
   useEffect(() => {
     if (open) document.body.style.overflow = "hidden";
     else document.body.style.overflow = "";
     return () => (document.body.style.overflow = "");
   }, [open]);
 
-  // close on ESC
+  /* --------------------------------------------------
+   * Close on ESC
+   * -------------------------------------------------- */
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -41,13 +45,13 @@ export default function DonationModal({ open, onClose }) {
     const callable = httpsCallable(functions, "createMoneyDonation");
     const res = await callable({
       amountJPY: 1500,
-      message: "Platform maintenance donation",
+      message: "Subscription access payment",
     });
     if (res?.data?.donationId) {
       setDonationId(res.data.donationId);
       return res.data.donationId;
     }
-    throw new Error("Failed to create donation record");
+    throw new Error("Failed to create subscription record");
   };
 
   const uploadProof = async (file, id) => {
@@ -57,7 +61,8 @@ export default function DonationModal({ open, onClose }) {
     return new Promise((resolve, reject) => {
       uploadTask.on(
         "state_changed",
-        (snap) => setProgress((snap.bytesTransferred / snap.totalBytes) * 100),
+        (snap) =>
+          setProgress((snap.bytesTransferred / snap.totalBytes) * 100),
         (err) => reject(err),
         async () => resolve(await getDownloadURL(uploadTask.snapshot.ref))
       );
@@ -71,22 +76,30 @@ export default function DonationModal({ open, onClose }) {
     }
     try {
       setUploading(true);
-      toast.loading("Uploading proof…", { id: "donate" });
+      toast.loading("Uploading receipt…", { id: "subscribe" });
+
       const id = donationId || (await createDonationRecord());
       const proofUrl = await uploadProof(file, id);
 
-      toast.loading("Submitting donation confirmation…", { id: "donate" });
+      toast.loading("Submitting subscription…", { id: "subscribe" });
       const callable = httpsCallable(functions, "reportMoneyDonation_User");
       const res = await callable({ donationId: id, proofUrl });
 
-      toast.dismiss("donate");
-      if (res?.data?.ok) toast.success("✅ Donation submitted successfully!");
-      else toast("Donation submitted — pending verification.", { icon: "💌" });
+      toast.dismiss("subscribe");
+
+      if (res?.data?.ok) {
+        toast.success("✅ Subscription submitted successfully!");
+      } else {
+        toast("Subscription submitted — pending verification.", {
+          icon: "🧾",
+        });
+      }
+
       onClose();
     } catch (err) {
       console.error(err);
-      toast.dismiss("donate");
-      toast.error(err.message || "Failed to submit donation.");
+      toast.dismiss("subscribe");
+      toast.error(err.message || "Failed to submit subscription.");
     } finally {
       setUploading(false);
     }
@@ -111,26 +124,26 @@ export default function DonationModal({ open, onClose }) {
         </button>
 
         <h2 className="text-xl font-semibold mb-4 text-gray-900 text-center">
-          💴 Bank Transfer Donation
+          🔓 Subscription via Bank Transfer
         </h2>
 
         <p className="text-sm text-gray-700 mb-4 text-center">
-          Transfer <strong>¥1,500</strong> to support{" "}
+          Transfer <strong>¥1,500</strong> to activate subscription access on{" "}
           <b>Freebies Japan</b>, then upload your payment receipt below.
         </p>
-<div className="bg-white/90 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl p-4 mb-4 shadow-sm transition-colors duration-200">
-  <h3 className="font-semibold text-gray-800 dark:text-gray-100 mb-2">
-    🏦 Bank Transfer Details
-  </h3>
-  <div className="space-y-1 text-sm text-gray-800 dark:text-gray-200 leading-relaxed">
-    <p><b>🏦 Bank:</b> {bankInfo.bankName}</p>
-    <p><b>🏢 Branch:</b> {bankInfo.branchName}</p>
-    <p><b>💳 Type:</b> {bankInfo.accountType}</p>
-    <p><b>🔢 Account:</b> {bankInfo.accountNumber}</p>
-    <p><b>👤 Holder:</b> {bankInfo.accountHolder}</p>
-  </div>
-</div>
 
+        <div className="bg-white/90 border border-gray-300 rounded-xl p-4 mb-4 shadow-sm">
+          <h3 className="font-semibold text-gray-800 mb-2">
+            🏦 Bank Transfer Details
+          </h3>
+          <div className="space-y-1 text-sm text-gray-800 leading-relaxed">
+            <p><b>🏦 Bank:</b> {bankInfo.bankName}</p>
+            <p><b>🏢 Branch:</b> {bankInfo.branchName}</p>
+            <p><b>💳 Type:</b> {bankInfo.accountType}</p>
+            <p><b>🔢 Account:</b> {bankInfo.accountNumber}</p>
+            <p><b>👤 Holder:</b> {bankInfo.accountHolder}</p>
+          </div>
+        </div>
 
         <label className="block text-sm font-medium text-gray-700 mb-1">
           Upload Payment Receipt <span className="text-red-500">*</span>
@@ -142,17 +155,19 @@ export default function DonationModal({ open, onClose }) {
           onChange={(e) => setFile(e.target.files[0])}
           className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 mb-2 focus:ring-2 focus:ring-indigo-500 outline-none"
         />
+
         {file && (
           <p className="text-xs text-gray-500 mb-2 truncate">
             Selected: {file.name}
           </p>
         )}
+
         {progress > 0 && (
           <div className="w-full bg-gray-200 rounded-full h-2 mb-3">
             <div
               className="bg-indigo-600 h-2 rounded-full transition-all"
               style={{ width: `${progress}%` }}
-            ></div>
+            />
           </div>
         )}
 
@@ -169,7 +184,7 @@ export default function DonationModal({ open, onClose }) {
             disabled={uploading}
             className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-lg transition disabled:opacity-50"
           >
-            {uploading ? "Submitting…" : "Submit Donation"}
+            {uploading ? "Submitting…" : "Subscribe"}
           </button>
         </div>
       </div>

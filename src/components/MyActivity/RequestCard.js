@@ -1,11 +1,6 @@
 // ============================================================================
-// FILE: RequestCard.jsx — PHASE-2 FINAL STRICT FREE-ITEM REQUEST CARD (PATCHED)
-// Free items ONLY — No premium logic allowed.
-// Mobile-first layout — works with Request drawer.
-// FIXES:
-// - Guaranteed image rendering
-// - Safe donation fallback
-// - Zero assumptions about joined data
+// FILE: RequestCard.jsx — PHASE-2 FINAL (COMPATIBLE)
+// Fixed for MyActivity data structure
 // ============================================================================
 
 import React from "react";
@@ -23,42 +18,69 @@ import StatusBadge from "./StatusBadge";
    CONSTANTS
 ------------------------------------------------------------ */
 
-// Delivery states where buyer cannot act anymore
+// Normalized delivery states where buyer actions are locked
 const DELIVERY_LOCK = [
   "accepted",
-  "pickup_scheduled",
-  "in_transit",
-  "out_for_delivery",
+  "addresssubmitted",
+  "pickupscheduled",
+  "pickupconfirmed",
+  "intransit",
+  "outfordelivery",
   "delivered",
-  "buyer_confirmed",
+  "buyerconfirmed",
+  "completed",
 ];
 
-// Allowed delete states
+// Allowed delete states (UI-only cleanup)
 const ALLOW_DELETE = [
   "rejected",
   "cancelled",
   "expired",
-  "completed",
-  "delivered",
-  "buyer_confirmed",
 ];
 
 /* ------------------------------------------------------------
-   IMAGE RESOLVER (CRITICAL FIX)
+   IMAGE RESOLVER (SAFE)
 ------------------------------------------------------------ */
 const resolveImage = (item) => {
-  // Preferred: joined donation images
-  if (item?.donation?.images?.length) {
-    return item.donation.images[0];
+  // Handle both item.donation and direct donation data
+  const donation = item.donation || item;
+  
+  if (donation.images?.length) {
+    return donation.images[0];
   }
 
-  // Fallback: embedded images (legacy / partial joins)
-  if (item?.itemImages?.length) {
+  if (donation.imageUrls?.length) {
+    return donation.imageUrls[0];
+  }
+
+  if (donation.image) {
+    return donation.image;
+  }
+
+  if (item.itemImages?.length) {
     return item.itemImages[0];
   }
 
-  // Absolute fallback
   return "/images/default-item.jpg";
+};
+
+/* ------------------------------------------------------------
+   TITLE & DESCRIPTION RESOLVER
+------------------------------------------------------------ */
+const resolveTitle = (item) => {
+  const donation = item.donation || item;
+  return donation.title || 
+         donation.itemTitle || 
+         item.itemTitle || 
+         "Untitled Item";
+};
+
+const resolveDescription = (item) => {
+  const donation = item.donation || item;
+  return donation.description || 
+         donation.itemDescription || 
+         item.itemDescription || 
+         "No description available.";
 };
 
 /* ------------------------------------------------------------
@@ -69,55 +91,71 @@ export default function RequestCard({
   currentUser,
   onView,
   onDelete,
-  onAwardAction,            // accept / decline award
-  onBuyerConfirmDelivery,   // Confirm delivery (FREE)
+  onAwardAction,
   deleting,
 }) {
   if (!item) return null;
 
-  const donation = item.donation || {};
+  // Handle both item.donation and direct donation data
+  const donation = item.donation || item;
+
+  // 🔑 PHASE-2 DELIVERY SOURCE OF TRUTH
   const delivery = item.deliveryData || {};
 
-  // Premium items MUST NOT show here
+  // HARD GUARD — premium must never appear here
   if (donation.type === "premium" || item.isPremium) return null;
 
   const userId = currentUser?.uid;
   const isBuyer = userId === item.userId;
-  const isSeller = userId === donation.donorId;
 
-  const deliveryStatus = (delivery.deliveryStatus || "")
+  /* ------------------------------------------------------------
+     DELIVERY LOCK (STATUS + FIELD-BASED)
+  ------------------------------------------------------------ */
+  const normalizedDeliveryStatus = (
+    delivery.status ||
+    delivery.deliveryStatus ||
+    item.deliveryStatus ||
+    ""
+  )
     .toLowerCase()
     .replace(/[-_]/g, "");
 
-  const isLocked = DELIVERY_LOCK.includes(deliveryStatus);
+  const isLocked =
+    DELIVERY_LOCK.includes(normalizedDeliveryStatus) ||
+    item.deliveryStatus === "pending_seller_confirmation" ||
+    !!delivery.deliveryAddress;
 
-  // Delete permission
-  const canDelete = ALLOW_DELETE.includes(item.status) && !isLocked;
+  /* ------------------------------------------------------------
+     PERMISSIONS
+  ------------------------------------------------------------ */
 
-  // Award zone (buyer only)
-  const canAcceptOrDecline = item.status === "awarded" && isBuyer;
+  // Delete permission (safe + conservative)
+  const canDelete =
+    ALLOW_DELETE.includes(item.status) && !isLocked;
 
-  // FREE DELIVERY CONFIRMATION (buyer only)
-  const canBuyerConfirmDelivery =
+  // Buyer acceptance zone (delivery intent)
+  const canAccept =
+    item.status === "awarded" &&
     isBuyer &&
-    ["delivered", "intransit", "outfordelivery", "completioncheck"].includes(
-      deliveryStatus
-    );
+    !isLocked &&
+    item.deliveryStatus !== "pending_seller_confirmation";
 
-  // ✅ SAFE IMAGE
   const img = resolveImage(item);
+  const title = resolveTitle(item);
+  const description = resolveDescription(item);
 
   const safeClick = (e) => {
     if (e.target.closest(".action-btn")) return;
-    onView(item);
+    onView();
   };
 
   const formatDate = () => {
     try {
-      if (item.updatedAt?.toDate)
-        return item.updatedAt.toDate().toLocaleDateString();
-      if (item.updatedAt)
-        return new Date(item.updatedAt).toLocaleDateString();
+      const date = item.updatedAt || donation.updatedAt;
+      if (date?.toDate)
+        return date.toDate().toLocaleDateString();
+      if (date)
+        return new Date(date).toLocaleDateString();
     } catch {}
     return "—";
   };
@@ -129,15 +167,15 @@ export default function RequestCard({
       onClick={safeClick}
       className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all cursor-pointer relative"
     >
-      {/* BUYER / SELLER BADGE */}
-      {(isBuyer || isSeller) && (
+      {/* BUYER BADGE */}
+      {isBuyer && (
         <div className="absolute bottom-3 left-3 bg-black/70 text-white text-[10px] px-2 py-1 rounded-full z-20">
-          {isBuyer ? "Your Request" : "Your Item"}
+          Your Request
         </div>
       )}
 
       {/* AWARDED BADGE */}
-      {item.status === "awarded" && (
+      {item.status === "awarded" && !isLocked && (
         <div className="absolute top-3 left-3 bg-purple-600 text-white text-xs px-3 py-1.5 rounded-full font-semibold shadow-lg z-20 flex items-center gap-1">
           <Award size={12} />
           AWARDED
@@ -153,9 +191,8 @@ export default function RequestCard({
 
       {/* ACTION BUTTONS */}
       <div className="absolute top-3 right-3 z-30 flex gap-2">
-
-        {/* Award accept / decline (buyer only) */}
-        {canAcceptOrDecline && (
+        {/* ACCEPT AWARD → DELIVERY DETAILS */}
+        {canAccept && (
           <>
             <button
               onClick={(e) => {
@@ -163,28 +200,31 @@ export default function RequestCard({
                 onAwardAction(item, "accept");
               }}
               className="action-btn bg-green-600 hover:bg-green-700 text-white p-2 rounded-full shadow transition hover:scale-110"
+              title="Accept item"
             >
               <Check size={14} />
             </button>
 
+            {/* REMOVE FROM MY ACTIVITY (UI-ONLY) */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onAwardAction(item, "decline");
+                onDelete();
               }}
-              className="action-btn bg-red-600 hover:bg-red-700 text-white p-2 rounded-full shadow transition hover:scale-110"
+              className="action-btn bg-gray-500 hover:bg-gray-600 text-white p-2 rounded-full shadow transition hover:scale-110"
+              title="Remove from my activity"
             >
               <X size={14} />
             </button>
           </>
         )}
 
-        {/* Delete */}
+        {/* DELETE (REJECTED / EXPIRED ONLY) */}
         {canDelete && (
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onDelete(item);
+              onDelete();
             }}
             disabled={deleting}
             className="action-btn bg-red-500 hover:bg-red-600 text-white p-2 rounded-full shadow transition hover:scale-110 disabled:opacity-40"
@@ -202,7 +242,7 @@ export default function RequestCard({
       <div className="relative w-full h-48 bg-gray-100 rounded-t-xl overflow-hidden">
         <img
           src={img}
-          alt={donation.title || "Item"}
+          alt={title}
           loading="lazy"
           className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
           onError={(e) => {
@@ -215,33 +255,37 @@ export default function RequestCard({
       {/* BODY */}
       <div className="p-4">
         <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2">
-          {donation.title || "Untitled Item"}
+          {title}
         </h3>
 
         <p className="text-gray-600 text-sm mb-3 line-clamp-2">
-          {donation.description || "No description available."}
+          {description}
         </p>
+
+        {/* ITEM INFO */}
+        {donation.price && (
+          <p className="text-xs text-gray-700 mb-1">
+            Value: ¥{(donation.price || 0).toLocaleString()}
+          </p>
+        )}
+
+        {donation.condition && (
+          <p className="text-xs text-gray-500 mb-2">
+            Condition: {donation.condition}
+          </p>
+        )}
 
         <div className="flex items-center justify-between">
           <StatusBadge
             status={item.status}
-            deliveryStatus={delivery.deliveryStatus}
+            deliveryStatus={
+              delivery.status || delivery.deliveryStatus || item.deliveryStatus
+            }
           />
-          <span className="text-xs text-gray-500">{formatDate()}</span>
+          <span className="text-xs text-gray-500">
+            {formatDate()}
+          </span>
         </div>
-
-        {/* BUYER DELIVERY CONFIRMATION */}
-        {canBuyerConfirmDelivery && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onBuyerConfirmDelivery(item);
-            }}
-            className="w-full mt-3 py-2 bg-indigo-600 text-white rounded-lg shadow hover:bg-indigo-700 text-sm"
-          >
-            Confirm Delivery
-          </button>
-        )}
       </div>
     </motion.div>
   );

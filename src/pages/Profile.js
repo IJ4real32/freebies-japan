@@ -1,5 +1,6 @@
 // ✅ FILE: src/pages/Profile.jsx
 // UI-UNIFIED VERSION — Matches MyActivity / Items styling
+// F-8: Credit visibility added (Option C compliant)
 
 import React, { useState, useEffect } from "react";
 import axios from "axios";
@@ -116,6 +117,10 @@ export default function Profile() {
     );
   }
 
+  const creditsLeft = typeof currentUser?.trialCreditsLeft === "number"
+    ? currentUser.trialCreditsLeft
+    : 0;
+
   return (
     <div className="min-h-screen bg-gray-50 pb-24 px-4">
       <main className="max-w-2xl mx-auto bg-white rounded-xl border border-gray-200 shadow-sm p-6 sm:p-8 mt-6">
@@ -143,6 +148,17 @@ export default function Profile() {
               }`}
             />
           ))}
+        </div>
+
+        {/* 🔹 CREDITS (F-8 ADDITION) */}
+        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6 text-sm text-indigo-900">
+          <p className="font-semibold text-base">
+            Credits remaining: {creditsLeft}
+          </p>
+          <p className="text-xs text-indigo-700 mt-1">
+            Credits are used only when you receive an item.
+            Requests are always free.
+          </p>
         </div>
 
         {/* Email Section */}

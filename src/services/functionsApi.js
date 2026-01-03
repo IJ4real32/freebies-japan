@@ -86,10 +86,37 @@ export const cancelPremiumTransaction = async ({ itemId, reason }) => {
 
 export const onRequestCreateAddTicket = async ({ itemId }) => {
   await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "onRequestCreateAddTicket");
+
+  const callable = httpsCallable(
+    functionsRegion,
+    "onRequestCreateAddTicket"
+  );
+
   const res = await callable({ itemId });
-  return res?.data || { ok: false };
+  const data = res?.data || {};
+
+  // Phase-2 idempotent handling
+  if (data.alreadyRequested) {
+    return {
+      ok: true,
+      alreadyRequested: true,
+      availabilityCycle: data.availabilityCycle,
+    };
+  }
+
+  if (data.requestCreated) {
+    return {
+      ok: true,
+      requestCreated: true,
+      requestId: data.requestId,
+      availabilityCycle: data.availabilityCycle,
+    };
+  }
+
+  // Fallback (should not happen in Phase-2)
+  return { ok: false };
 };
+
 
 // decrement trial credit
 export const decrementTrialCredit = async () => {
@@ -112,15 +139,36 @@ export const submitDeliveryDetails = async ({
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "submitDeliveryDetails");
 
-  const res = await callable({
-    requestId,
-    deliveryAddress: deliveryAddress.trim(),
-    deliveryPhone: deliveryPhone.trim(),
-    deliveryInstructions,
-    submittedAt: new Date().toISOString(),
-  });
+  try {
+    const res = await callable({
+      requestId,
+      deliveryAddress: deliveryAddress.trim(),
+      deliveryPhone: deliveryPhone.trim(),
+      deliveryInstructions,
+      submittedAt: new Date().toISOString(),
+    });
 
-  return res?.data || { ok: false };
+    return res?.data || { ok: false };
+
+  } catch (err) {
+    /**
+     * Firebase callable errors come back like:
+     * err.code === "already-exists"
+     * err.message includes backend message
+     */
+    if (
+      err?.code === "already-exists" ||
+      err?.message?.includes("already been submitted")
+    ) {
+      return {
+        ok: true,
+        alreadySubmitted: true,
+      };
+    }
+
+    // Re-throw all other errors
+    throw err;
+  }
 };
 
 export const recipientConfirmDelivery = async ({ donationId, accepted }) => {
@@ -143,6 +191,50 @@ export const cancelDonationForDonor = async ({ donationId, reason }) => {
   const res = await callable({ donationId, reason });
   return res?.data || { ok: false };
 };
+// =====================================================
+// PICKUP SCHEDULING (PHASE 2)
+// =====================================================
+
+// Seller proposes pickup dates
+export const submitSellerPickupOptions = async ({
+  deliveryId,
+  dates,
+}) => {
+  await ensureFreshIdToken();
+
+  const callable = httpsCallable(
+    functionsRegion,
+    "submitSellerPickupOptions"
+  );
+
+  const res = await callable({
+    deliveryId,
+    dates,
+  });
+
+  return res?.data || { ok: false };
+};
+
+// Admin confirms one pickup date
+export const confirmPickupDate = async ({
+  deliveryId,
+  selectedDate,
+}) => {
+  await ensureFreshIdToken();
+
+  const callable = httpsCallable(
+    functionsRegion,
+    "confirmPickupDate"
+  );
+
+  const res = await callable({
+    deliveryId,
+    selectedDate,
+  });
+
+  return res?.data || { ok: false };
+};
+
 
 // =====================================================
 // ADMIN: FREE ITEM REQUEST MODERATION

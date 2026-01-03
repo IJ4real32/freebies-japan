@@ -1,11 +1,14 @@
-// ✅ FILE: src/components/MyActivity/AddressConfirmationModal.jsx (PHASE-2 FINAL)
-import React, { useState } from "react";
-import { doc, updateDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "../../firebase";        // ✅ FIXED PATH
-import { useAuth } from "../../contexts/AuthContext";
+// ✅ FILE: src/components/MyActivity/AddressConfirmationModal.jsx
+// PHASE-2 FINAL — UI-only modal (backend handled by parent)
 
-import { 
-  X, Loader2, MapPin, Phone, MessageSquare 
+import React, { useState, useEffect } from "react";
+import { useAuth } from "../../contexts/AuthContext";
+import {
+  X,
+  Loader2,
+  MapPin,
+  Phone,
+  MessageSquare,
 } from "lucide-react";
 
 const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
@@ -17,6 +20,17 @@ const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // Reset form when modal opens / closes
+  useEffect(() => {
+    if (!open) {
+      setAddress("");
+      setPhone("");
+      setInstructions("");
+      setError("");
+      setLoading(false);
+    }
+  }, [open]);
+
   if (!open || !request) return null;
 
   const handleSubmit = async () => {
@@ -25,15 +39,8 @@ const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
       return;
     }
 
-    const userEmailSafe =
-      request.userEmail ||
-      request.email ||
-      request.itemData?.recipientEmail ||
-      currentUser?.email ||
-      null;
-
-    if (!userEmailSafe) {
-      setError("Unable to determine your email address.");
+    if (!currentUser) {
+      setError("You must be logged in.");
       return;
     }
 
@@ -41,57 +48,20 @@ const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
     setError("");
 
     try {
-      const deliveryPayload = {
-        requestId: request.id,
-        userId: request.userId,
-        userEmail: userEmailSafe,
-        itemId: request.itemId,
-        itemTitle:
-          request.itemData?.title ||
-          request.itemName ||
-          request.itemTitle ||
-          "Unknown Item",
-
-        deliveryAddress: address.trim(),
-        deliveryPhone: phone.trim(),
-        deliveryInstructions: instructions.trim() || "",
-
-        status: "accepted",
-        deliveryStatus: "accepted",
-
-        awardAcceptedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-
-      // 🔵 Write deliveryDetails/{requestId}
-      await setDoc(
-        doc(db, "deliveryDetails", request.id),
-        deliveryPayload,
-        { merge: true }
-      );
-
-      // 🟢 Update request/{requestId}
-      await updateDoc(doc(db, "requests", request.id), {
-        status: "accepted",
-        deliveryStatus: "accepted",
-        awardAcceptedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+      // ⬇️ PASS DATA TO PARENT ONLY (NO BACKEND CALL HERE)
+      onConfirm?.({
+        item: request,
+        address: address.trim(),
+        phone: phone.trim(),
+        instructions: instructions.trim() || "",
       });
 
-      // Let MyActivity handle notifications via Cloud Functions
-      onConfirm?.(request);
+      window?.toast?.success?.("🎉 Delivery details submitted!");
 
-      window?.toast?.success?.("🎉 Delivery details confirmed!");
-
-      // Reset UI
-      setAddress("");
-      setPhone("");
-      setInstructions("");
       onClose();
-
     } catch (err) {
-      console.error("❌ Address Confirm Error:", err);
-      setError("Failed to save delivery details: " + err.message);
+      console.error("Address modal error:", err);
+      setError("Failed to submit delivery details.");
     } finally {
       setLoading(false);
     }
@@ -100,7 +70,7 @@ const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[999]">
       <div className="bg-white rounded-xl max-w-md w-full shadow-xl overflow-hidden">
-        
+
         {/* HEADER */}
         <div className="p-6 border-b flex items-center justify-between">
           <div>

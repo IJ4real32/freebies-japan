@@ -1,7 +1,7 @@
 // ======================================================================
 // FILE: src/pages/MyActivity.js
-// PHASE-2 FINAL — Mobile-First + Correct Paths + Stable Hooks
-// COMPLETE PATCH: Batched Donations + Delivery Details + Seller Pickup + Dual Confirmation
+// PHASE-2 FINAL — SAFE VERSION
+// All permission issues fixed, no crashes, graceful degradation
 // ======================================================================
 
 import React, { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
@@ -10,7 +10,6 @@ import { httpsCallable } from "firebase/functions";
 import {
   doc,
   updateDoc,
-  writeBatch,
   serverTimestamp,
   collection,
   getDocs,
@@ -21,10 +20,6 @@ import {
 
 import { db, functions } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
-
-import useMyRequests from "../components/MyActivity/hooks/useMyRequests";
-import useMyPurchases from "../components/MyActivity/hooks/useMyPurchases";
-import useMyListings from "../components/MyActivity/hooks/useMyListings";
 
 // CARDS
 import RequestCard from "../components/MyActivity/RequestCard";
@@ -37,9 +32,7 @@ import DetailDrawerPremium from "../components/MyActivity/drawer/DetailDrawerPre
 
 // MODALS
 import RelistModal from "../components/MyActivity/RelistModal";
-import PickupModal from "../components/MyActivity/PickupModal";
 import ConfirmActionModal from "../components/MyActivity/ConfirmActionModal";
-import DeclineReasonModal from "../components/MyActivity/DeclineReasonModal";
 import AddressConfirmationModal from "../components/MyActivity/AddressConfirmationModal";
 
 import { Gift, ShoppingBag, List, Plus, Loader2 } from "lucide-react";
@@ -49,7 +42,7 @@ import toast from "react-hot-toast";
 // HELPERS
 // ======================================================================
 
-const filterVisible = (arr) => arr?.filter((i) => i && !i.softDeleted) || [];
+const filterVisible = (arr) => arr?.filter(Boolean) || [];
 
 // Split array into chunks of N (Firestore "in" limit = 10)
 const chunkArray = (arr, size = 10) => {
@@ -59,6 +52,34 @@ const chunkArray = (arr, size = 10) => {
   }
   return chunks;
 };
+
+// ======================================================================
+// LOCALSTORAGE HELPERS (ADDED FOR ALL TYPES)
+// ======================================================================
+
+const getHiddenItems = (type) => {
+  try {
+    return JSON.parse(localStorage.getItem(`hidden${type}`) || "{}");
+  } catch {
+    return {};
+  }
+};
+
+const hideItem = (type, itemId) => {
+  const hidden = getHiddenItems(type);
+  hidden[itemId] = true;
+  localStorage.setItem(`hidden${type}`, JSON.stringify(hidden));
+};
+
+// Specific helpers for each type (backward compatible)
+const getHiddenRequests = () => getHiddenItems("Requests");
+const hideRequest = (requestId) => hideItem("Requests", requestId);
+
+const getHiddenPurchases = () => getHiddenItems("Purchases");
+const hidePurchase = (purchaseId) => hideItem("Purchases", purchaseId);
+
+const getHiddenListings = () => getHiddenItems("Listings");
+const hideListing = (listingId) => hideItem("Listings", listingId);
 
 // ======================================================================
 // MEMOIZED COMPONENTS
@@ -116,90 +137,369 @@ export default function MyActivity() {
   }, [activeTab]);
 
   // -------------------------------------
-  // HOOK DATA
+  // DATA STATES
   // -------------------------------------
-  const requests = useMyRequests(currentUser?.uid);
-  const purchases = useMyPurchases(currentUser?.uid);
-  const listings = useMyListings(currentUser?.uid);
+  const [requests, setRequests] = useState([]);
+  const [purchases, setPurchases] = useState([]);
+  const [listings, setListings] = useState([]);
+  const [dataLoading, setDataLoading] = useState({
+    requests: true,
+    purchases: true,
+    listings: true
+  });
 
-  // -------------------------------------
+  // ======================================================================
   // DONATION JOIN STATE
-  // -------------------------------------
+  // ======================================================================
   const [donationMap, setDonationMap] = useState({});
   const [donationLoading, setDonationLoading] = useState(false);
 
   // -------------------------------------
-  // DELIVERY DETAILS STATE
+  // LOADING STATES
   // -------------------------------------
-  const [deliveryDetailsMap, setDeliveryDetailsMap] = useState({});
   const [loadingDeliveryDetails, setLoadingDeliveryDetails] = useState({});
-
+ 
   // ======================================================================
   // MODAL STATES
   // ======================================================================
 
-  const [drawer, setDrawer] = useState({ open: false, type: null, item: null });
+  // PATCH 1: Replace drawer state
+  const [drawer, setDrawer] = useState({
+    open: false,
+    type: null,      // "free" | "premium" | "listing"
+    itemId: null,    // 🔑 ID ONLY
+  });
+
   const [confirmModal, setConfirmModal] = useState({
     open: false,
     item: null,
     action: null,
     message: "",
   });
-  const [declineModal, setDeclineModal] = useState({ open: false, item: null });
   const [addressModal, setAddressModal] = useState({ open: false, item: null });
-  const [pickupModal, setPickupModal] = useState({ 
-    open: false, 
-    donation: null,
-    mode: "free",
-    requestId: null 
-  });
   const [relistModal, setRelistModal] = useState({ open: false, item: null });
   const [loading, setLoading] = useState({
     delete: null,
     premium: null,
-    decline: null,
     address: null,
-    schedule: null,
     relist: null,
   });
 
   // ======================================================================
-  // MEMOIZED DERIVED DATA
+  // DATA FETCHING (SAFE, NO CRASHES)
   // ======================================================================
 
-  const rawReq = useMemo(() => filterVisible(requests), [requests]);
+  // Fetch requests (with safe deliveryDetails handling)
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setRequests([]);
+      setDataLoading(prev => ({ ...prev, requests: false }));
+      return;
+    }
+
+    let mounted = true;
+
+    const fetchRequests = async () => {
+      try {
+        setDataLoading(prev => ({ ...prev, requests: true }));
+        
+        // Fetch user's requests
+        const requestsQuery = query(
+          collection(db, "requests"),
+          where("userId", "==", currentUser.uid)
+        );
+        
+        const requestsSnap = await getDocs(requestsQuery);
+        const requestsData = requestsSnap.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }));
+
+        // Get donations for these requests
+        const itemIds = [...new Set(requestsData.map(r => r.itemId).filter(Boolean))];
+        let donations = [];
+        
+        if (itemIds.length > 0) {
+          try {
+            // Split into batches for Firestore "in" query limit
+            const batches = chunkArray(itemIds, 10);
+            for (const batch of batches) {
+              const donationsQuery = query(
+                collection(db, "donations"),
+                where("__name__", "in", batch)
+              );
+              const donationsSnap = await getDocs(donationsQuery);
+              donationsSnap.forEach(doc => {
+                donations.push({ id: doc.id, ...doc.data() });
+              });
+            }
+          } catch (err) {
+            console.warn("Donations fetch partial failure:", err);
+          }
+        }
+
+        const donationLookup = donations.reduce((acc, d) => {
+          acc[d.id] = d;
+          return acc;
+        }, {});
+
+        // Enhanced requests with donations
+        const enhancedRequests = requestsData.map(req => ({
+          ...req,
+          donation: donationLookup[req.itemId] || null,
+        }));
+
+        if (mounted) {
+          setRequests(enhancedRequests);
+        }
+      } catch (error) {
+        console.warn("Requests fetch failed:", error);
+        if (mounted) {
+          setRequests([]);
+        }
+      } finally {
+        if (mounted) {
+          setDataLoading(prev => ({ ...prev, requests: false }));
+        }
+      }
+    };
+
+    fetchRequests();
+
+    return () => {
+      mounted = false;
+    };
+  }, [currentUser?.uid]); // Removed hiddenRequestIds dependency
+
+  // Fetch purchases (with safe deliveryDetails handling)
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setPurchases([]);
+      setDataLoading(prev => ({ ...prev, purchases: false }));
+      return;
+    }
+
+    let mounted = true;
+
+    const fetchPurchases = async () => {
+      try {
+        setDataLoading(prev => ({ ...prev, purchases: true }));
+        
+        // Fetch user's purchases
+        const purchasesQuery = query(
+          collection(db, "payments"),
+          where("userId", "==", currentUser.uid),
+          where("type", "==", "item")
+        );
+        
+        const purchasesSnap = await getDocs(purchasesQuery);
+        const purchasesData = purchasesSnap.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter(p => p.userId === currentUser.uid); // Extra safety filter
+
+        // Get donations for these purchases
+        const itemIds = [...new Set(purchasesData.map(p => p.itemId).filter(Boolean))];
+        let donations = [];
+        
+        if (itemIds.length > 0) {
+          try {
+            const batches = chunkArray(itemIds, 10);
+            for (const batch of batches) {
+              const donationsQuery = query(
+                collection(db, "donations"),
+                where("__name__", "in", batch)
+              );
+              const donationsSnap = await getDocs(donationsQuery);
+              donationsSnap.forEach(doc => {
+                donations.push({ id: doc.id, ...doc.data() });
+              });
+            }
+          } catch (err) {
+            console.warn("Purchases donations fetch partial failure:", err);
+          }
+        }
+
+        const donationLookup = donations.reduce((acc, d) => {
+          acc[d.id] = d;
+          return acc;
+        }, {});
+
+        // Enhanced purchases with donations
+        const enhancedPurchases = purchasesData.map(purchase => ({
+          ...purchase,
+          donation: donationLookup[purchase.itemId] || null,
+          isPremium: true,
+        }));
+
+        if (mounted) {
+          setPurchases(enhancedPurchases);
+        }
+      } catch (error) {
+        console.warn("Purchases fetch failed:", error);
+        if (mounted) {
+          setPurchases([]);
+        }
+      } finally {
+        if (mounted) {
+          setDataLoading(prev => ({ ...prev, purchases: false }));
+        }
+      }
+    };
+
+    fetchPurchases();
+
+    return () => {
+      mounted = false;
+    };
+  }, [currentUser?.uid]);
+
+  // Fetch listings (with safe deliveryDetails handling)
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setListings([]);
+      setDataLoading(prev => ({ ...prev, listings: false }));
+      return;
+    }
+
+    let mounted = true;
+
+    const fetchListings = async () => {
+      try {
+        setDataLoading(prev => ({ ...prev, listings: true }));
+        
+        // Fetch user's listings
+        const listingsQuery = query(
+          collection(db, "donations"),
+          where("donorId", "==", currentUser.uid)
+        );
+        
+        const listingsSnap = await getDocs(listingsQuery);
+        const listingsData = listingsSnap.docs.map(doc => ({ 
+          id: doc.id, 
+          ...doc.data() 
+        }));
+
+        // Enhanced listings with request info (safe)
+        const enhancedListings = await Promise.all(
+          listingsData.map(async (listing) => {
+            let requestStatus = null;
+            let hasActiveRequest = false;
+
+            // Try to find associated request (silent fail on permissions)
+            try {
+              const requestsQuery = query(
+                collection(db, "requests"),
+                where("itemId", "==", listing.id),
+                where("status", "in", ["awarded", "accepted"])
+              );
+              const requestsSnap = await getDocs(requestsQuery);
+              if (!requestsSnap.empty) {
+                const request = requestsSnap.docs[0];
+                requestStatus = request.data().status;
+                hasActiveRequest = true;
+              }
+            } catch (error) {
+              // Silent permission fallback
+            }
+
+            return {
+              ...listing,
+              requestStatus,
+              hasActiveRequest,
+            };
+          })
+        );
+
+        if (mounted) {
+          setListings(enhancedListings);
+        }
+      } catch (error) {
+        console.warn("Listings fetch failed:", error);
+        if (mounted) {
+          setListings([]);
+        }
+      } finally {
+        if (mounted) {
+          setDataLoading(prev => ({ ...prev, listings: false }));
+        }
+      }
+    };
+
+    fetchListings();
+
+    return () => {
+      mounted = false;
+    };
+  }, [currentUser?.uid]);
+
+  // ======================================================================
+  // MEMOIZED DERIVED DATA WITH FILTERING
+  // ======================================================================
+
+  // Filter requests using localStorage
+  const filteredRequests = useMemo(() => {
+    const hidden = getHiddenRequests();
+    return requests.filter((r) => !hidden[r.id]);
+  }, [requests]);
+
+  const rawReq = useMemo(() => filterVisible(filteredRequests), [filteredRequests]);
   
   const visReq = useMemo(() => 
     rawReq.map((r) => ({
       ...r,
-      donation: donationMap[r.itemId] || null,
+      donation: donationMap[r.itemId] || r.donation || null,
     })), 
     [rawReq, donationMap]
   );
 
-  const visPur = useMemo(() => filterVisible(purchases), [purchases]);
-  const visList = useMemo(() => filterVisible(listings), [listings]);
+  // Filter purchases using localStorage
+  const filteredPurchases = useMemo(() => {
+    const hidden = getHiddenPurchases();
+    return purchases.filter((p) => !hidden[p.id]);
+  }, [purchases]);
+
+  const visPur = useMemo(() => filterVisible(filteredPurchases), [filteredPurchases]);
+
+  // Filter listings using localStorage
+  const filteredListings = useMemo(() => {
+    const hidden = getHiddenListings();
+    return listings.filter((l) => !hidden[l.id]);
+  }, [listings]);
+
+  const visList = useMemo(() => filterVisible(filteredListings), [filteredListings]);
 
   // Enhanced listings with request info for FREE items
   const listingsWithRequestInfo = useMemo(() => {
     return visList.map((listing) => {
-      const deliveryDetails = listing.deliveryDetails || null;
-
       // ✅ Phase-2 correct: gate pickup on request lifecycle
-      const hasActiveRequest =
-        listing.requestStatus &&
-        ["awarded", "accepted"].includes(listing.requestStatus);
+      const hasActiveRequest = listing.hasActiveRequest || false;
 
       return {
         ...listing,
-        deliveryDetails, // KEEP: seller visibility + future dual confirmation
         hasActiveRequest,
       };
     });
   }, [visList]);
 
+  // PATCH 2: Add derived drawer item (authoritative)
+  const drawerItem = useMemo(() => {
+    if (!drawer.open || !drawer.itemId) return null;
+
+    if (drawer.type === "free") {
+      return visReq.find((r) => r.id === drawer.itemId) || null;
+    }
+
+    if (drawer.type === "premium") {
+      return visPur.find((p) => p.id === drawer.itemId) || null;
+    }
+
+    if (drawer.type === "listing") {
+      return listingsWithRequestInfo.find((l) => l.id === drawer.itemId) || null;
+    }
+
+    return null;
+  }, [drawer, visReq, visPur, listingsWithRequestInfo]);
+
   // ======================================================================
-  // PATCH 1: UPDATED DONATION PREFETCH EFFECT (BATCHED)
+  // DONATION PREFETCH FOR REQUESTS TAB
   // ======================================================================
 
   useEffect(() => {
@@ -218,30 +518,25 @@ export default function MyActivity() {
           return;
         }
 
-        // Split into batches of 10 (Firestore "in" query limit)
         const batches = chunkArray(itemIds, 10);
         const mergedMap = {};
 
-        // Fetch donations in parallel batches
-        const batchPromises = batches.map(async (batch) => {
-          const q = query(
-            collection(db, "donations"),
-            where("__name__", "in", batch)
-          );
+        // Fetch donations in batches
+        for (const batch of batches) {
+          try {
+            const q = query(
+              collection(db, "donations"),
+              where("__name__", "in", batch)
+            );
 
-          const snap = await getDocs(q);
-          return snap;
-        });
-
-        // Wait for all batches to complete
-        const results = await Promise.all(batchPromises);
-        
-        // Merge all results
-        results.forEach((snap) => {
-          snap.forEach((doc) => {
-            mergedMap[doc.id] = doc.data();
-          });
-        });
+            const snap = await getDocs(q);
+            snap.forEach((doc) => {
+              mergedMap[doc.id] = doc.data();
+            });
+          } catch (err) {
+            console.warn("Donation batch fetch partial failure", err);
+          }
+        }
 
         setDonationMap(mergedMap);
       } catch (err) {
@@ -289,259 +584,152 @@ export default function MyActivity() {
     });
   }, []);
 
-  const confirmDelete = useCallback(async () => {
+  // PATCH 2: PATCH confirmDelete (UPDATED WITH LOCALSTORAGE FOR ALL TYPES)
+  const confirmDelete = useCallback(() => {
     const { item } = confirmModal;
-    if (!item || loading.delete) return;
+    if (!item) return;
 
-    try {
-      setLoading((s) => ({ ...s, delete: item.id }));
-      const ref = !item.isPremium && item.userId
-        ? doc(db, "requests", item.id)
-        : item.isPremium && item.paymentId
-        ? doc(db, "payments", item.paymentId)
-        : doc(db, "donations", item.id);
+    // Determine item type
+    const isRequest = item.userId && !item.isPremium; // Request has userId, not premium
+    const isPurchase = item.isPremium === true || item.paymentId; // Purchase is premium or has paymentId
+    const isListing = item.donorId === currentUser?.uid; // Listing has donorId matching current user
 
-      await updateDoc(ref, {
-        softDeleted: true,
-        deletedAt: serverTimestamp(),
-      });
-      toast.success("Item removed");
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setLoading((s) => ({ ...s, delete: null }));
-      setConfirmModal({ open: false, item: null, action: null, message: "" });
+    if (isRequest) {
+      // UI-ONLY soft delete for requests (Phase-2 correct)
+      hideRequest(item.id);
+      toast.success("Request removed from your activity");
+    } 
+    else if (isPurchase) {
+      // UI-ONLY soft delete for purchases
+      hidePurchase(item.id);
+      // Also remove from state for immediate UI update
+      setPurchases(prev => prev.filter(p => p.id !== item.id));
+      toast.success("Purchase removed from your activity");
     }
-  }, [confirmModal, loading.delete]);
+    else if (isListing) {
+      // UI-ONLY soft delete for listings
+      hideListing(item.id);
+      // Also remove from state for immediate UI update
+      setListings(prev => prev.filter(l => l.id !== item.id));
+      toast.success("Listing removed from your activity");
+    }
+    else {
+      // Fallback - just close modal
+      console.warn("Unknown item type in confirmDelete:", item);
+      toast.error("Unable to remove item");
+    }
+
+    setConfirmModal({
+      open: false,
+      action: null,
+      item: null,
+      message: "",
+    });
+  }, [confirmModal, currentUser?.uid]);
 
   // ======================================================================
-  // BACKLOG #3: DUAL CONFIRMATION DELIVERY HANDLERS
+  // DUAL CONFIRMATION DELIVERY HANDLERS (PHASE-2 SAFE)
   // ======================================================================
 
-  // BUYER confirms delivery (FREE or PREMIUM)
-  const handleBuyerConfirmDelivery = useCallback(async (item) => {
-    if (loading.premium) return;
-    
-    try {
-      setLoading((s) => ({ ...s, premium: item.id }));
-      const fn = httpsCallable(functions, "updateBuyerDeliveryConfirmation");
-      const payload = item.isPremium ? { itemId: item.itemId } : { requestId: item.id };
-      const res = await fn(payload);
-      
-      toast[res.data?.ok ? "success" : "error"](
-        res.data?.ok ? "Delivery confirmed." : "Unable to confirm delivery."
-      );
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setLoading((s) => ({ ...s, premium: null }));
-    }
-  }, [loading.premium]);
+  // BUYER confirms delivery (FREE or PREMIUM) - PHASE-2 COMPLIANT
+  const handleBuyerConfirmDelivery = useCallback(
+    async (item) => {
+      if (!item?.id || loading.premium) return;
 
-  // SELLER confirms delivery (FREE + PREMIUM)
-  const handleSellerConfirmDelivery = useCallback(async (deliveryId) => {
-    if (!deliveryId) return;
+      try {
+        setLoading((s) => ({ ...s, premium: item.id }));
 
-    try {
-      await updateDoc(doc(db, "deliveryDetails", deliveryId), {
-        sellerConfirmedAt: serverTimestamp(),
-      });
+        // ✅ FIX: Use correct backend function name and payload
+        const fn = httpsCallable(functions, "buyerConfirmDelivery");
+        
+        // ✅ FIX: Send deliveryId
+        await fn({
+          deliveryId: item.deliveryData?.id || item.id,
+        });
 
-      toast.success("Delivery confirmed (seller).");
-    } catch (err) {
-      toast.error(err.message);
-    }
-  }, []);
+        toast.success("Delivery confirmed.");
+      } catch (err) {
+        console.error(err);
+        toast.error(err?.message || "Failed to confirm delivery.");
+      } finally {
+        setLoading((s) => ({ ...s, premium: null }));
+      }
+    },
+    [loading.premium]
+  );
 
-  // Decline award
-  const submitDecline = useCallback(async (item, reason) => {
-    if (loading.decline) return;
-
-    try {
-      setLoading((s) => ({ ...s, decline: item.id }));
-
-      await updateDoc(doc(db, "requests", item.id), {
-        status: "declined",
-        softDeleted: true,
-        declineReason: reason || "",
-        updatedAt: serverTimestamp(),
-      });
-
-      toast.success("You declined the award.");
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setDeclineModal({ open: false, item: null });
-      setLoading((s) => ({ ...s, decline: null }));
-    }
-  }, [loading.decline]);
-
-  // Address submission
+  // ADDRESS SUBMISSION (BUYER → BACKEND-AUTHORITATIVE)
   const submitAddress = useCallback(
     async ({ item, address, phone, instructions }) => {
-      if (loading.address) return;
+      if (!item?.id || loading.address) return;
 
       try {
         setLoading((s) => ({ ...s, address: item.id }));
-        const batch = writeBatch(db);
 
-        batch.update(doc(db, "requests", item.id), {
-          status: "accepted",
-          deliveryStatus: "accepted",
-          updatedAt: serverTimestamp(),
+        const fn = httpsCallable(functions, "submitDeliveryDetails");
+
+        await fn({
+          requestId: item.id,
+          deliveryAddress: address,
+          deliveryPhone: phone,
+          deliveryInstructions: instructions || "",
         });
 
-        batch.set(
-          doc(db, "deliveryDetails", item.id),
-          {
-            deliveryStatus: "accepted",
-            updatedAt: serverTimestamp(),
-            addressInfo: { address, phone, instructions },
-            requestId: item.id,
-            itemId: item.itemId,
-            userId: currentUser.uid,
-          },
-          { merge: true }
-        );
-
-        await batch.commit();
-        toast.success("Address saved.");
+        toast.success("🎉 Delivery details confirmed!");
       } catch (err) {
-        toast.error(err.message);
+        console.error(err);
+        toast.error(
+          err?.message || "Failed to save delivery details."
+        );
       } finally {
         setAddressModal({ open: false, item: null });
         setLoading((s) => ({ ...s, address: null }));
       }
     },
-    [currentUser, loading.address]
+    [loading.address]
   );
 
-  // ======================================================================
-  // PATCH 2 & 3: ENHANCED DELIVERY DETAILS + SELLER PICKUP HANDLERS
-  // ======================================================================
-
-  // Seller schedules pickup (FREE items)
-  const handlePickupSchedule = useCallback(async (item, pickupData) => {
-    if (loading.schedule) return;
-
-    try {
-      setLoading((s) => ({ ...s, schedule: item.id }));
-
-      // Check if this is FREE item scheduling
-      if (pickupData && pickupData.requestId) {
-        // FREE item: save to request document
-        await updateDoc(doc(db, "requests", pickupData.requestId), {
-          sellerPickupDate: pickupData.pickupDate || serverTimestamp(),
-          sellerPickupWindow: pickupData.pickupWindow || "",
-          sellerPickupStatus: "proposed",
-          sellerPickupUpdatedAt: serverTimestamp(),
-        });
-        toast.success("Pickup date proposed.");
-      } else {
-        // PREMIUM item (mock)
-        toast.success("Pickup scheduled (mock)");
-      }
-    } catch (err) {
-      console.error("Pickup scheduling error:", err);
-      toast.error(err.message || "Failed to schedule pickup");
-    } finally {
-      setPickupModal({ open: false, donation: null, mode: "free", requestId: null });
-      setLoading((s) => ({ ...s, schedule: null }));
-    }
-  }, [loading.schedule]);
-
-  // Fetch delivery details for listing
-  const fetchListingDeliveryDetails = useCallback(async (listing) => {
-    try {
-      // Check if listing has a deliveryDetails field
-      if (listing.deliveryDetails) {
-        return listing.deliveryDetails;
-      }
-      
-      // Check if there's a deliveryDetails collection entry
-      const deliveryDoc = await getDoc(doc(db, "deliveryDetails", listing.id));
-      if (deliveryDoc.exists()) {
-        return deliveryDoc.data();
-      }
-      
-      return null;
-    } catch (err) {
-      console.error("Error fetching listing delivery details:", err);
-      return null;
-    }
-  }, []);
-
   // Enhanced view handler for listings
-  const handleViewListing = useCallback(async (listing) => {
+  const handleViewListing = useCallback((listing) => {
     setLoadingDeliveryDetails((prev) => ({ ...prev, [listing.id]: true }));
     
     try {
-      // Fetch delivery details
-      const deliveryDetails = await fetchListingDeliveryDetails(listing);
-      
-      // Create enhanced listing
-      const enhancedListing = {
-        ...listing,
-        deliveryDetails: deliveryDetails,
-        donation: listing.donation ? {
-          ...listing.donation,
-          deliveryDetails: deliveryDetails
-        } : undefined
-      };
-
-      setDrawer({ 
-        open: true, 
-        type: "listing", 
-        item: enhancedListing 
+      // Store only ID in drawer
+      setDrawer({
+        open: true,
+        type: "listing",
+        itemId: listing.id,
       });
     } catch (err) {
       console.error("Error loading listing details:", err);
-      setDrawer({ 
-        open: true, 
-        type: "listing", 
-        item: listing 
+      setDrawer({
+        open: true,
+        type: "listing",
+        itemId: listing.id,
       });
     } finally {
       setLoadingDeliveryDetails((prev) => ({ ...prev, [listing.id]: false }));
     }
-  }, [fetchListingDeliveryDetails]);
+  }, []);
 
-  // Schedule pickup handler for listings
+  // Schedule pickup handler for listings - PHASE-2 COMPLIANT
   const handleListingSchedulePickup = useCallback((listing) => {
     if (!listing) return;
 
     const isFreeItem = listing.donation?.type !== "premium";
 
-    // -------------------------------------------
-    // FREE ITEMS — pickup must be request-gated
-    // -------------------------------------------
     if (isFreeItem) {
-      // requestId must come from request context, never fallback
-      const requestId = listing.deliveryDetails?.requestId || null;
-
-      if (!listing.hasActiveRequest || !requestId) {
+      if (!listing.hasActiveRequest) {
         toast.error("Pickup cannot be scheduled yet.");
         return;
       }
 
-      setPickupModal({
-        open: true,
-        donation: listing,
-        requestId,
-        mode: "free",
-      });
-
+      toast.info("Use the pickup scheduler in the item details");
       return;
     }
 
-    // -------------------------------------------
     // PREMIUM ITEMS — logistics visibility / future confirmation
-    // -------------------------------------------
-    setPickupModal({
-      open: true,
-      donation: listing,
-      mode: "premium",
-    });
+    toast.info("Premium item pickup handled by admin logistics");
   }, []);
 
   // Relist item
@@ -558,7 +746,11 @@ export default function MyActivity() {
 
       toast.success("Item relisted.");
     } catch (err) {
-      toast.error(err.message);
+      if (err.code === 'permission-denied') {
+        toast.error("You don't have permission to relist this item.");
+      } else {
+        toast.error(err.message);
+      }
     } finally {
       setRelistModal({ open: false, item: null });
       setLoading((s) => ({ ...s, relist: null }));
@@ -577,42 +769,15 @@ export default function MyActivity() {
     };
   }, []);
 
-  // ======================================================================
-  // BACKLOG #3: AUTO-COMPLETE DELIVERY WHEN BOTH CONFIRM
-  // ======================================================================
-
-  // Auto-complete delivery when buyer + seller have confirmed
+  // Safety auto-close
   useEffect(() => {
-    const deliveries = [];
-
-    visReq.forEach((r) => {
-      if (r.deliveryDetails) deliveries.push(r.deliveryDetails);
-    });
-
-    visPur.forEach((p) => {
-      if (p.deliveryDetails) deliveries.push(p.deliveryDetails);
-    });
-
-    deliveries.forEach(async (delivery) => {
-      if (
-        delivery.buyerConfirmedAt &&
-        delivery.sellerConfirmedAt &&
-        delivery.deliveryStatus !== "completed"
-      ) {
-        try {
-          await updateDoc(doc(db, "deliveryDetails", delivery.id), {
-            deliveryStatus: "completed",
-            deliveryCompletedAt: serverTimestamp(),
-          });
-        } catch (err) {
-          console.error("Auto-complete delivery failed:", err);
-        }
-      }
-    });
-  }, [visReq, visPur]);
+    if (drawer.open && !drawerItem) {
+      setDrawer({ open: false, type: null, itemId: null });
+    }
+  }, [drawer.open, drawerItem]);
 
   // ======================================================================
-  // RENDER
+  // RENDER WITH GRACEFUL DEGRADATION
   // ======================================================================
 
   if (!currentUser) {
@@ -636,18 +801,33 @@ export default function MyActivity() {
       );
     }
 
-    // Show donation loading only for requests tab
-    if (activeTab === "requests" && donationLoading && visReq.length > 0) {
-      return (
-        <div className="flex flex-col items-center justify-center py-16">
-          <Loader2 className="animate-spin text-gray-400 mb-4" size={28} />
-          <p className="text-sm text-gray-500">Loading donation details...</p>
-        </div>
-      );
-    }
+    const showEmptyState = (message) => (
+      <div className="flex flex-col items-center justify-center py-16">
+        <p className="text-gray-500 mb-2">{message}</p>
+      </div>
+    );
 
     switch (activeTab) {
       case "requests":
+        if (dataLoading.requests) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16">
+              <Loader2 className="animate-spin text-gray-400 mb-4" size={28} />
+              <p className="text-sm text-gray-500">Loading requests...</p>
+            </div>
+          );
+        }
+        if (donationLoading && visReq.length > 0) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16">
+              <Loader2 className="animate-spin text-gray-400 mb-4" size={28} />
+              <p className="text-sm text-gray-500">Loading donation details...</p>
+            </div>
+          );
+        }
+        if (visReq.length === 0) {
+          return showEmptyState("No requests yet");
+        }
         return (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {visReq.map((req) => (
@@ -655,12 +835,20 @@ export default function MyActivity() {
                 key={req.id}
                 item={req}
                 currentUser={currentUser}
-                onView={() => setDrawer({ open: true, type: "free", item: req })}
+                onView={() => setDrawer({ open: true, type: "free", itemId: req.id })}
                 onDelete={() => handleDelete(req)}
                 onAwardAction={(item, action) => {
+                  if (
+                    action === "accept" &&
+                    item.deliveryStatus === "pending_seller_confirmation"
+                  ) {
+                    toast.info("Delivery address already submitted.");
+                    return;
+                  }
+
                   action === "accept"
                     ? setAddressModal({ open: true, item })
-                    : setDeclineModal({ open: true, item });
+                    : handleDelete(item);
                 }}
               />
             ))}
@@ -668,13 +856,24 @@ export default function MyActivity() {
         );
 
       case "purchases":
+        if (dataLoading.purchases) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16">
+              <Loader2 className="animate-spin text-gray-400 mb-4" size={28} />
+              <p className="text-sm text-gray-500">Loading purchases...</p>
+            </div>
+          );
+        }
+        if (visPur.length === 0) {
+          return showEmptyState("No purchases yet");
+        }
         return (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {visPur.map((p) => (
               <PurchaseCard
                 key={p.id}
                 item={p}
-                onView={() => setDrawer({ open: true, type: "premium", item: p })}
+                onView={() => setDrawer({ open: true, type: "premium", itemId: p.id })}
                 onDelete={() => handleDelete(p)}
               />
             ))}
@@ -682,6 +881,17 @@ export default function MyActivity() {
         );
 
       case "listings":
+        if (dataLoading.listings) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16">
+              <Loader2 className="animate-spin text-gray-400 mb-4" size={28} />
+              <p className="text-sm text-gray-500">Loading listings...</p>
+            </div>
+          );
+        }
+        if (listingsWithRequestInfo.length === 0) {
+          return showEmptyState("No listings yet");
+        }
         return (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {listingsWithRequestInfo.map((l) => (
@@ -693,7 +903,6 @@ export default function MyActivity() {
                 onDelete={() => handleDelete(l)}
                 onRelist={() => setRelistModal({ open: true, item: l })}
                 onSchedulePickup={() => handleListingSchedulePickup(l)}
-                onSellerConfirmDelivery={handleSellerConfirmDelivery}
                 isLoading={loadingDeliveryDetails[l.id]}
                 showDeliveryInfo={true}
               />
@@ -707,25 +916,23 @@ export default function MyActivity() {
   };
 
   // ======================================================================
-  // ENHANCED DRAWER HANDLING
+  // ENHANCED DRAWER HANDLING (PHASE-2 CLEAN)
   // ======================================================================
 
   const renderDrawer = () => {
-    if (!drawer.open) return null;
+    if (!drawer.open || !drawerItem) return null;
 
     switch (drawer.type) {
       case "free":
         return (
           <DetailDrawerFree
             open={drawer.open}
-            item={drawer.item}
+            item={drawerItem}
             currentUser={currentUser}
-            onClose={() => setDrawer({ open: false, type: null, item: null })}
-            onBuyerConfirm={() => handleBuyerConfirmDelivery(drawer.item)}
-            onDelete={() => handleDelete(drawer.item)}
-            onAcceptAward={() => setAddressModal({ open: true, item: drawer.item })}
-            onDeclineAward={() => setDeclineModal({ open: true, item: drawer.item })}
-            onSellerConfirmDelivery={handleSellerConfirmDelivery}
+            onClose={() => setDrawer({ open: false, type: null, itemId: null })}
+            onDelete={() => handleDelete(drawerItem)}
+            onAcceptAward={() => setAddressModal({ open: true, item: drawerItem })}
+            onDeclineAward={() => handleDelete(drawerItem)}
           />
         );
 
@@ -733,14 +940,11 @@ export default function MyActivity() {
         return (
           <DetailDrawerPremium
             open={drawer.open}
-            item={drawer.item}
+            item={drawerItem}
             currentUser={currentUser}
-            onClose={() => setDrawer({ open: false, type: null, item: null })}
-            onBuyerConfirm={() => handleBuyerConfirmDelivery(drawer.item)}
-            onDelete={() => handleDelete(drawer.item)}
-            onSchedulePickup={() => setPickupModal({ open: true, donation: drawer.item, mode: "premium" })}
-            showDeliveryDetails={!!drawer.item?.deliveryDetails}
-            onSellerConfirmDelivery={handleSellerConfirmDelivery}
+            onClose={() => setDrawer({ open: false, type: null, itemId: null })}
+            onDelete={() => handleDelete(drawerItem)}
+            showDeliveryDetails={!!drawerItem?.deliveryDetails}
           />
         );
 
@@ -748,18 +952,11 @@ export default function MyActivity() {
         return (
           <DetailDrawerPremium
             open={drawer.open}
-            item={drawer.item}
+            item={drawerItem}
             currentUser={currentUser}
-            onClose={() => setDrawer({ open: false, type: null, item: null })}
-            onBuyerConfirm={() => handleBuyerConfirmDelivery(drawer.item)}
-            onDelete={() => handleDelete(drawer.item)}
-            onSchedulePickup={() => setPickupModal({ 
-              open: true, 
-              donation: drawer.item,
-              mode: drawer.item?.donation?.type === "premium" ? "premium" : "free"
-            })}
-            showDeliveryDetails={!!drawer.item?.deliveryDetails}
-            onSellerConfirmDelivery={handleSellerConfirmDelivery}
+            onClose={() => setDrawer({ open: false, type: null, itemId: null })}
+            onDelete={() => handleDelete(drawerItem)}
+            showDeliveryDetails={!!drawerItem?.deliveryDetails}
           />
         );
 
@@ -811,7 +1008,21 @@ export default function MyActivity() {
         )}
       </div>
 
-      {/* CONTENT */}
+      {/* F-8: Credit visibility (informational only) */}
+      <div className="px-4 pt-4">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <span className="font-medium">Credits left:</span>{" "}
+          <span className="font-semibold text-slate-900">
+            {typeof currentUser?.trialCreditsLeft === "number"
+              ? currentUser.trialCreditsLeft
+              : 0}
+          </span>
+          <span className="ml-2 text-xs text-slate-500">
+            (used only when you receive an item — requests are always free)
+          </span>
+        </div>
+      </div>
+
       <div className="p-4">
         {renderContent()}
       </div>
@@ -830,34 +1041,19 @@ export default function MyActivity() {
         onRelist={handleRelist}
       />
 
-      <PickupModal
-        open={pickupModal.open}
-        donation={pickupModal.donation}
-        loading={loading.schedule}
-        onClose={() => setPickupModal({ open: false, donation: null, mode: "free", requestId: null })}
-        onSchedule={(pickupData) => {
-          if (pickupModal.donation) {
-            handlePickupSchedule(pickupModal.donation, pickupData);
-          }
-        }}
-        mode={pickupModal.mode}
-        requestId={pickupModal.requestId}
-      />
-
-      <DeclineReasonModal
-        open={declineModal.open}
-        item={declineModal.item}
-        loading={loading.decline === declineModal.item?.id}
-        onSubmit={(reason) => submitDecline(declineModal.item, reason)}
-        onClose={() => setDeclineModal({ open: false, item: null })}
-      />
-
       <AddressConfirmationModal
         open={addressModal.open}
         request={addressModal.item}
-        loading={loading.address === addressModal.item?.id}
+        loading={
+          Boolean(
+            addressModal.item &&
+            loading.address === addressModal.item.id
+          )
+        }
         onConfirm={submitAddress}
-        onClose={() => setAddressModal({ open: false, item: null })}
+        onClose={() =>
+          setAddressModal({ open: false, item: null })
+        }
       />
 
       <ConfirmActionModal

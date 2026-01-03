@@ -533,79 +533,83 @@ export default function Items() {
   // =======================================================
   // ✅ DELIVERABLE A: FREE ITEM REQUEST HANDLER
   // =======================================================
-  const handleRequest = useCallback(async (item) => {
-    // ✅ A: Premium guard
-    if (item.type === "premium") {
-      toast.error("This is a premium item - please use purchase flow.");
-      return;
-    }
-    
-    if (!currentUser) {
-      toast.error("🔑 Please log in to request items.");
-      navigate("/login");
-      return;
-    }
-    
-    // ✅ A: Cannot request own item
-    if (isCurrentUserOwner(item, currentUser.uid)) {
-      toast.error("🚫 You cannot request your own item.");
-      return;
-    }
-    
-    // ✅ A: Check if requestable
-    if (!isFreeRequestable(item)) {
-      toast.error("🎁 This item is no longer available.");
-      return;
-    }
-    
-    // ✅ A: Check if window closed
-    if (isFreeItemClosed(item)) {
-      toast.error("⏰ Request window is closed for this item.");
-      return;
-    }
-    
-    // ✅ A: Trial credit check
-    if (!isSubscribed && (isTrialExpired || trialCreditsLeft <= 0)) {
-      toast(
-        "🎁 You've used all free requests. Please subscribe to continue!",
-        { icon: "🙏" }
-      );
-      setShowSubscriptionModal(true);
-      return;
-    }
-    
-    setSubmitting(true);
-    
-    try {
-      // ✅ A: Unify request creation
-      const result = await onRequestCreateAddTicket({
-        itemId: item.id,
-        ownerId: item.ownerId,
-      });
-      
-      if (!result?.success) {
-        throw new Error(result?.message || "Request failed.");
-      }
-      
-      // ✅ A: Deduct trial credit for non-subscribed users
-      if (!isSubscribed) {
-        try {
-          await decrementTrialCredit();
-        } catch (creditError) {
-          console.error("Error decrementing trial credit:", creditError);
-        }
-      }
-      
+ const handleRequest = useCallback(async (item) => {
+  // ✅ A: Premium guard
+  if (item.type === "premium") {
+    toast.error("This is a premium item - please use purchase flow.");
+    return;
+  }
+
+  if (!currentUser) {
+    toast.error("🔑 Please log in to request items.");
+    navigate("/login");
+    return;
+  }
+
+  // ✅ A: Cannot request own item
+  if (isCurrentUserOwner(item, currentUser.uid)) {
+    toast.error("🚫 You cannot request your own item.");
+    return;
+  }
+
+  // ✅ A: Check if requestable
+  if (!isFreeRequestable(item)) {
+    toast.error("🎁 This item is no longer available.");
+    return;
+  }
+
+  // ✅ A: Check if window closed
+  if (isFreeItemClosed(item)) {
+    toast.error("⏰ Request window is closed for this item.");
+    return;
+  }
+
+  // ✅ A: Trial credit guard (UI-level only)
+  if (!isSubscribed && (isTrialExpired || trialCreditsLeft <= 0)) {
+    toast(
+      "🎁 You've used all free requests. Please subscribe to continue!",
+      { icon: "🙏" }
+    );
+    setShowSubscriptionModal(true);
+    return;
+  }
+
+  setSubmitting(true);
+
+  try {
+    // ✅ Phase-2: Idempotent backend request
+    const result = await onRequestCreateAddTicket({
+      itemId: item.id,
+    });
+
+    if (result?.alreadyRequested) {
+      toast.success("📌 You already requested this item.");
+    } else if (result?.requestCreated) {
       toast.success("✅ Request submitted successfully!");
-      await refreshItemData();
-      setViewItem(null);
-    } catch (err) {
-      console.error("handleRequest error:", err);
-      toast.error(err.message || "Failed to submit request.");
-    } finally {
-      setSubmitting(false);
+    } else if (!result?.ok) {
+      throw new Error("Request failed.");
     }
-  }, [currentUser, navigate, isSubscribed, isTrialExpired, trialCreditsLeft, refreshItemData]);
+
+    // ✅ Backend already deducted trial credit
+    // → just refresh UI state
+    await refreshItemData();
+    setViewItem(null);
+
+  } catch (err) {
+    console.error("handleRequest error:", err);
+    toast.error(err?.message || "Failed to submit request.");
+  } finally {
+    setSubmitting(false);
+  }
+}, [
+  currentUser,
+  navigate,
+  isSubscribed,
+  isTrialExpired,
+  trialCreditsLeft,
+  refreshItemData,
+]);
+
 
   // =======================================================
   // ✅ DELIVERABLE D & F: PREMIUM ACTION HANDLER

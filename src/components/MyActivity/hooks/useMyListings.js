@@ -1,64 +1,88 @@
-// ============================================================================
-// FILE: useMyListings.js — SELLER LISTINGS (Free + Premium)
-// Phase-2 Final Hook
-// ============================================================================
+// FILE: src/components/MyActivity/hooks/useMyListings.js
 
-import { useEffect, useState } from "react";
-import {
-  collection,
-  query,
-  where,
-  onSnapshot,
-  doc,
-  getDoc,
-} from "firebase/firestore";
-import { db } from "../../../firebase";
-
-const filterVisible = (list) =>
-  list?.filter((i) => i && !i.softDeleted) ?? [];
+import { useState, useEffect } from 'react';
+import { collection, query, where, onSnapshot, getDoc, doc } from 'firebase/firestore';
+import { db } from '../../../firebase';
 
 export default function useMyListings(uid) {
   const [listings, setListings] = useState([]);
-
-  const hydrate = async (donation) => {
-    const itemId = donation.id;
-    if (!itemId) return donation;
-
-    try {
-      const deliverySnap = await getDoc(doc(db, "deliveryDetails", itemId));
-
-      return {
-        ...donation,
-        deliveryData: deliverySnap.exists() ? deliverySnap.data() : null,
-      };
-    } catch (err) {
-      console.error("hydrateListing error:", err);
-      return donation;
-    }
-  };
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!uid) return;
+    if (!uid) {
+      setListings([]);
+      setLoading(false);
+      return;
+    }
 
     const q = query(
-      collection(db, "donations"),
-      where("donorId", "==", uid)
+      collection(db, 'donations'),
+      where('donorId', '==', uid)
     );
 
-    const unsub = onSnapshot(q, async (snap) => {
-      const out = [];
+    const unsub = onSnapshot(
+      q,
+      async (snapshot) => {
+        const baseList = snapshot.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }));
 
-      for (const d of snap.docs) {
-        const donation = { id: d.id, donation: d.data() };
+        // ✅ FIX: Enhanced with safe deliveryDetails fetch
+        const enhanced = await Promise.all(
+          baseList.map(async (donation) => {
+            let deliveryData = null;
+            
+            try {
+              // Try to get delivery details (may fail due to permissions)
+              const deliverySnap = await getDoc(
+                doc(db, 'deliveryDetails', donation.id)
+              );
+              deliveryData = deliverySnap.exists()
+                ? deliverySnap.data()
+                : null;
+            } catch (error) {
+              // Silent permission fallback
+              deliveryData = null;
+            }
 
-        if (donation.donation?.softDeleted) continue;
+            // Get request status if this item was awarded
+            let requestStatus = null;
+            let requestId = null;
+            
+            if (deliveryData?.requestId) {
+              try {
+                const requestSnap = await getDoc(
+                  doc(db, 'requests', deliveryData.requestId)
+                );
+                if (requestSnap.exists()) {
+                  const requestData = requestSnap.data();
+                  requestStatus = requestData.status;
+                  requestId = requestSnap.id;
+                }
+              } catch (error) {
+                // Silent fallback
+              }
+            }
 
-        const full = await hydrate(donation);
-        out.push(full);
+            return {
+              ...donation,
+              deliveryData,
+              requestStatus,
+              requestId,
+            };
+          })
+        );
+
+        setListings(enhanced);
+        setLoading(false);
+      },
+      (error) => {
+        console.warn('Listings permission blocked', error);
+        setListings([]); // Graceful fallback
+        setLoading(false);
       }
-
-      setListings(filterVisible(out));
-    });
+    );
 
     return () => unsub();
   }, [uid]);
