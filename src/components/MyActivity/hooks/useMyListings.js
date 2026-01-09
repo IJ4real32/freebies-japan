@@ -1,8 +1,19 @@
+// ============================================================================
 // FILE: src/components/MyActivity/hooks/useMyListings.js
+// PHASE-2 FINAL — SELLER LISTINGS (AUTHORITATIVE, NO REGRESSIONS)
+// ============================================================================
 
-import { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, getDoc, doc } from 'firebase/firestore';
-import { db } from '../../../firebase';
+import { useState, useEffect } from "react";
+import {
+  collection,
+  query,
+  where,
+  onSnapshot,
+  getDoc,
+  getDocs,
+  doc,
+} from "firebase/firestore";
+import { db } from "../../../firebase";
 
 export default function useMyListings(uid) {
   const [listings, setListings] = useState([]);
@@ -15,9 +26,12 @@ export default function useMyListings(uid) {
       return;
     }
 
+    // ------------------------------------------------------------------
+    // 1️⃣ Seller listings come ONLY from donations (authoritative)
+    // ------------------------------------------------------------------
     const q = query(
-      collection(db, 'donations'),
-      where('donorId', '==', uid)
+      collection(db, "donations"),
+      where("donorId", "==", uid)
     );
 
     const unsub = onSnapshot(
@@ -28,58 +42,67 @@ export default function useMyListings(uid) {
           ...d.data(),
         }));
 
-        // ✅ FIX: Enhanced with safe deliveryDetails fetch
-        const enhanced = await Promise.all(
+        // ------------------------------------------------------------------
+        // 2️⃣ Enrich with request + delivery (PHASE-2 CANONICAL)
+        // ------------------------------------------------------------------
+        const enriched = await Promise.all(
           baseList.map(async (donation) => {
-            let deliveryData = null;
-            
-            try {
-              // Try to get delivery details (may fail due to permissions)
-              const deliverySnap = await getDoc(
-                doc(db, 'deliveryDetails', donation.id)
-              );
-              deliveryData = deliverySnap.exists()
-                ? deliverySnap.data()
-                : null;
-            } catch (error) {
-              // Silent permission fallback
-              deliveryData = null;
-            }
-
-            // Get request status if this item was awarded
-            let requestStatus = null;
             let requestId = null;
-            
-            if (deliveryData?.requestId) {
-              try {
-                const requestSnap = await getDoc(
-                  doc(db, 'requests', deliveryData.requestId)
+            let requestStatus = null;
+            let deliveryData = null;
+
+            try {
+              // ------------------------------------------------------------
+              // A️⃣ Find request linked to this donation
+              // ------------------------------------------------------------
+              const reqQuery = query(
+                collection(db, "requests"),
+                where("itemId", "==", donation.id)
+              );
+
+              const reqSnap = await getDocs(reqQuery);
+
+              if (!reqSnap.empty) {
+                const reqDoc = reqSnap.docs[0];
+                requestId = reqDoc.id;
+                requestStatus = reqDoc.data().status;
+
+                // ------------------------------------------------------------
+                // B️⃣ Load deliveryDetails using requestId (NOT donationId)
+                // ------------------------------------------------------------
+                const deliverySnap = await getDoc(
+                  doc(db, "deliveryDetails", requestId)
                 );
-                if (requestSnap.exists()) {
-                  const requestData = requestSnap.data();
-                  requestStatus = requestData.status;
-                  requestId = requestSnap.id;
-                }
-              } catch (error) {
-                // Silent fallback
+
+                deliveryData = deliverySnap.exists()
+                  ? deliverySnap.data()
+                  : null;
               }
+            } catch (err) {
+              // Permission-safe fallback (never crash UI)
+              deliveryData = null;
             }
 
             return {
               ...donation,
-              deliveryData,
-              requestStatus,
+
+              // Phase-2 enrichment
               requestId,
+              requestStatus,
+              deliveryData,
             };
           })
         );
 
-        setListings(enhanced);
+        setListings(enriched);
         setLoading(false);
       },
       (error) => {
-        console.warn('Listings permission blocked', error);
-        setListings([]); // Graceful fallback
+        console.warn(
+          "[useMyListings] Permission blocked or snapshot error",
+          error
+        );
+        setListings([]);
         setLoading(false);
       }
     );

@@ -22,6 +22,7 @@ import {
 
 import StatusBadge from "../StatusBadge";
 import SellerPickupScheduler from "../../Logistics/SellerPickupScheduler";
+import RecipientConfirmDelivery from "../RecipientConfirmDelivery";
 
 /* =========================================================
  * COMPONENT
@@ -40,8 +41,8 @@ export default function DetailDrawerFree({
 
   const {
     status,
-    userId,
-    ownerId,
+    userId,        // buyer
+    ownerId,       // seller
     donation = {},
   } = item;
 
@@ -71,9 +72,35 @@ export default function DetailDrawerFree({
     .toLowerCase()
     .replace(/[-_]/g, "");
 
+  /* =====================================================
+   * ADDRESS & TERMINAL FLAGS (AUTHORITATIVE)
+   * =================================================== */
   const hasAddress =
-    !!delivery.address ||
-    !!delivery.deliveryAddress;
+    delivery.addressSubmitted === true ||
+    (!!delivery.deliveryAddress && !!delivery.deliveryPhone);
+
+  const isClosed =
+    delivery.forceClosed === true ||
+    normalizedDeliveryStatus === "completed" ||
+    normalizedDeliveryStatus === "forceclosed";
+
+  /* =====================================================
+   * SELLER PICKUP GUARD (STRICT)
+   * =================================================== */
+  const canSellerSchedulePickup =
+    isSeller &&
+    hasAddress &&
+    !isClosed &&
+    delivery.pickupStatus !== "pickup_confirmed";
+
+  /* =====================================================
+   * BUYER CONFIRMATION GUARD (FREE ITEMS)
+   * =================================================== */
+  const canRecipientConfirm =
+    isBuyer &&
+    delivery.deliveryStatus === "delivered" &&
+    delivery.recipientConfirmed !== true &&
+    delivery.forceClosed !== true;
 
   /* =====================================================
    * READ-ONLY DELIVERY TIMELINE (AUTHORITATIVE)
@@ -83,7 +110,10 @@ export default function DetailDrawerFree({
       key: "award",
       label: "Award accepted",
       icon: Award,
-      done: status !== "awarded" && status !== "pending",
+      done:
+        status === "accepted" ||
+        hasAddress ||
+        normalizedDeliveryStatus !== "",
     },
     {
       key: "address",
@@ -208,8 +238,16 @@ export default function DetailDrawerFree({
           </div>
 
           {/* SELLER PICKUP SCHEDULER */}
-          {isSeller && (
+          {canSellerSchedulePickup && (
             <SellerPickupScheduler delivery={delivery} />
+          )}
+
+          {/* BUYER CONFIRM DELIVERY (FINAL STEP) */}
+          {canRecipientConfirm && (
+            <RecipientConfirmDelivery
+              request={item}
+              onDone={onClose}
+            />
           )}
 
           {/* BUYER AWARD ACTIONS (LOCKED AFTER ADDRESS) */}

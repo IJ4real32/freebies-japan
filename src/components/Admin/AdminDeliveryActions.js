@@ -2,12 +2,6 @@
 // AdminDeliveryActions.jsx
 // PHASE-2 FINAL — Admin delivery lifecycle controls
 // ===================================================================
-// Responsibilities:
-// - Mark delivery as IN TRANSIT
-// - Force close delivery (dispute / timeout)
-// - NO Firestore writes (callables only)
-// - Admin-only, state-locked
-// ===================================================================
 
 import React, { useState } from "react";
 import { httpsCallable } from "firebase/functions";
@@ -18,28 +12,24 @@ import { Truck, XCircle } from "lucide-react";
 export default function AdminDeliveryActions({ delivery, isAdmin }) {
   const [loading, setLoading] = useState(false);
 
-  // ------------------------------------------------------------------
-  // HARD GUARDS — Phase-2 rules
-  // ------------------------------------------------------------------
+  // --------------------------------------------------
+  // HARD GUARDS — PHASE-2 CORRECT
+  // --------------------------------------------------
   if (!isAdmin) return null;
   if (!delivery) return null;
-
-  // Only allow admin action AFTER pickup is confirmed
-  const canMarkInTransit =
-    delivery.pickupStatus === "confirmed" &&
-    delivery.deliveryStatus !== "in_transit" &&
-    delivery.deliveryStatus !== "completed" &&
-    delivery.deliveryStatus !== "force_closed";
 
   const isTerminal =
     delivery.deliveryStatus === "completed" ||
     delivery.deliveryStatus === "force_closed";
 
-  if (!canMarkInTransit && isTerminal) return null;
+  // Only allow marking in transit AFTER pickup confirmed
+  const canMarkInTransit =
+    delivery.pickupStatus === "confirmed" &&
+    delivery.deliveryStatus !== "in_transit";
 
-  /* ------------------------------------------------------------
-     MARK IN TRANSIT
-  ------------------------------------------------------------ */
+  // --------------------------------------------------
+  // MARK IN TRANSIT
+  // --------------------------------------------------
   const handleMarkInTransit = async () => {
     setLoading(true);
 
@@ -64,9 +54,9 @@ export default function AdminDeliveryActions({ delivery, isAdmin }) {
     }
   };
 
-  /* ------------------------------------------------------------
-     FORCE CLOSE (ADMIN SAFETY)
-  ------------------------------------------------------------ */
+  // --------------------------------------------------
+  // FORCE CLOSE
+  // --------------------------------------------------
   const handleForceClose = async () => {
     const reason = prompt(
       "Enter reason for force closing this delivery:"

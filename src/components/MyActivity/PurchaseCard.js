@@ -1,11 +1,11 @@
 // ======================================================================
 // FILE: PurchaseCard.jsx — PHASE-2 FINAL PREMIUM PURCHASE CARD
-// Updated for MyActivity compatibility
+// Fixed: Removed delivery data dependency to prevent permission errors
 // ======================================================================
 
 import React from "react";
 import { motion } from "framer-motion";
-import { Eye, Trash2, XCircle, CheckCircle, Clock } from "lucide-react";
+import { Eye, Trash2, XCircle, CheckCircle } from "lucide-react";
 
 // PREMIUM DELIVERY STATES
 const LOCKED = [
@@ -89,8 +89,8 @@ export default function PurchaseCard({
   // HARD GUARD — premium must never appear here
   if (donation.type !== "premium") return null;
 
-  // Use deliveryData if available (from MyActivity safe fetch)
-  const delivery = item.deliveryData || {};
+  // ✅ FIXED: Remove delivery data access - COD payments don't have it immediately
+  // const delivery = item.deliveryData || {}; // ❌ REMOVED
 
   const premiumStatus = (item.premiumStatus || "unknown")
     .toLowerCase()
@@ -101,8 +101,14 @@ export default function PurchaseCard({
   // IMAGE
   const img =
     donation.images?.[0] ||
+    donation.imageUrls?.[0] ||
+    donation.image ||
     item.itemImage ||
     "/images/default-item.jpg";
+
+  // TITLE & DESCRIPTION
+  const title = donation.title || donation.itemTitle || "Premium Item";
+  const description = donation.description || donation.itemDescription || "";
 
   // BUYER CONFIRM DELIVERY
   const canBuyerConfirm =
@@ -139,7 +145,7 @@ export default function PurchaseCard({
       <div className="w-full h-44 bg-gray-200 overflow-hidden rounded-t-xl">
         <img
           src={img}
-          alt={donation.title}
+          alt={title}
           onError={(e) => (e.target.src = "/images/default-item.jpg")}
           className="w-full h-full object-cover hover:scale-105 transition duration-300"
         />
@@ -148,29 +154,48 @@ export default function PurchaseCard({
       {/* BODY */}
       <div className="p-4">
         <h3 className="line-clamp-2 font-semibold text-gray-900 text-base mb-2">
-          {donation.title || "Premium Item"}
+          {title}
         </h3>
+
+        {description && (
+          <p className="text-sm text-gray-600 mb-2 line-clamp-2">
+            {description}
+          </p>
+        )}
 
         <p className="text-sm text-indigo-700 font-semibold">
           ¥{(donation.price || 0).toLocaleString()}
         </p>
 
-        {/* DELIVERY INFO */}
+        {/* ✅ FIXED: Remove delivery info display - it causes permission errors */}
+        {/* ❌ DELETED:
         {delivery.status && (
           <p className="mt-1 text-xs text-gray-600">
             Delivery: {delivery.status}
           </p>
         )}
+        */}
+
+        {/* Additional item info */}
+        {donation.condition && (
+          <p className="mt-1 text-xs text-gray-500">
+            Condition: {donation.condition}
+          </p>
+        )}
+
+        {/* Payment status */}
+        <p className="mt-1 text-xs text-gray-600">
+          Status: {status.badge}
+        </p>
 
         {/* ACTIONS */}
         <div className="mt-4 space-y-2">
-          {/* BUYER CONFIRM DELIVERY - MyActivity handles this in drawer */}
+          {/* BUYER CONFIRM DELIVERY */}
           {canBuyerConfirm && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                // This is handled in DetailDrawerPremium
-                // Just navigate to view
+                // Delivery confirmation handled in DetailDrawerPremium
                 onView();
               }}
               disabled={loading}
@@ -181,13 +206,12 @@ export default function PurchaseCard({
             </button>
           )}
 
-          {/* DECLINE AT DOOR - MyActivity handles this in drawer */}
+          {/* DECLINE AT DOOR */}
           {canDeclineAtDoor && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                // This is handled in DetailDrawerPremium
-                // Just navigate to view
+                // Decline at door handled in DetailDrawerPremium
                 onView();
               }}
               disabled={loading}

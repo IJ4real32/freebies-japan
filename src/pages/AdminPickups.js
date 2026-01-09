@@ -1,5 +1,6 @@
 // =============================================================
-// FILE: src/pages/AdminPickups.js (PHASE-2 COMPLETE + ITEM TITLE FIXED)
+// FILE: src/pages/AdminPickups.js
+// PHASE-2 FINAL — ADMIN PICKUPS & DELIVERIES
 // =============================================================
 
 import React, { useState, useEffect, useMemo } from "react";
@@ -8,20 +9,20 @@ import {
   onSnapshot,
   orderBy,
   query,
-  updateDoc,
   doc,
   getDoc,
 } from "firebase/firestore";
-import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
-import toast from "react-hot-toast";
 import { Link } from "react-router-dom";
+import toast from "react-hot-toast";
 import { checkAdminStatus } from "../utils/adminUtils";
+
 import AdminPickupConfirmation from "../components/Admin/AdminPickupConfirmation";
-import AdminDeliveryActions from "../components/Admin/AdminDeliveryActions"; // ✅ ADDED
+import AdminDeliveryActions from "../components/Admin/AdminDeliveryActions";
 import AdminForceClosePanel from "./admin/AdminForceClosePanel";
 import StatusBadge from "../components/MyActivity/StatusBadge";
+
 import {
   Search,
   Menu,
@@ -30,200 +31,193 @@ import {
   ChevronRight,
   RefreshCcw,
   Loader2,
-  Package,
-  ClipboardCopy,
   Clock,
   Calendar,
   MapPin,
   Phone,
   MessageSquare,
   User,
-  Truck,
   Shield,
+  Package,
+  Truck,
 } from "lucide-react";
+import { adminBackfillDelivery } from "../services/functionsApi";
 
-// =============================================================
-// MAIN COMPONENT
-// =============================================================
+/* =============================================================
+ * MAIN COMPONENT
+ * =========================================================== */
 export default function AdminPickups() {
   const { isAuthenticated, currentUser } = useAuth();
 
+  const [deliveries, setDeliveries] = useState([]);
   const [pickups, setPickups] = useState([]);
-  const [requests, setRequests] = useState([]);
-
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("");
-  const [search, setSearch] = useState("");
-  const [updating, setUpdating] = useState({});
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [lastSync, setLastSync] = useState(null);
-  const [activeView, setActiveView] = useState("deliveries");
   const [permissionError, setPermissionError] = useState(false);
 
-  const [callableFunctions, setCallableFunctions] = useState({
-    sendStatusUpdate: null,
-  });
+  const [search, setSearch] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeView, setActiveView] = useState("deliveries");
+  const [lastSync, setLastSync] = useState(null);
 
-  // -------------------------------------------------------------
-  // INIT FIREBASE FUNCTIONS
-  // -------------------------------------------------------------
-  useEffect(() => {
-    const functions = getFunctions();
-    setCallableFunctions({
-      sendStatusUpdate: httpsCallable(functions, "sendStatusUpdate"),
-    });
-  }, []);
-
-  // -------------------------------------------------------------
-  // CHECK ADMIN ACCESS
-  // -------------------------------------------------------------
+  /* -------------------------------------------------------------
+   * ADMIN ACCESS CHECK
+   * ----------------------------------------------------------- */
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    const checkAccess = async () => {
+    const run = async () => {
       const ok = await checkAdminStatus(currentUser);
       if (!ok) {
         setPermissionError(true);
         setLoading(false);
-        return;
       }
     };
 
-    checkAccess();
+    run();
   }, [isAuthenticated, currentUser]);
 
-  // -------------------------------------------------------------
-  // REALTIME PICKUPS + DELIVERY REQUESTS (PHASE-2 SAFE — RAW ONLY)
-  // -------------------------------------------------------------
+  /* -------------------------------------------------------------
+   * DELIVERY DETAILS (AUTHORITATIVE — BUYER SIDE)
+   * ----------------------------------------------------------- */
   useEffect(() => {
-    let unsubPickups = null;
-    let unsubDelivery = null;
-    let isMounted = true;
+    let unsub = null;
+    let alive = true;
 
     setLoading(true);
 
-    // ---------- PICKUPS ----------
-    const pickupQuery = query(
-      collection(db, "pickups"),
-      orderBy("createdAt", "desc")
-    );
-
-    unsubPickups = onSnapshot(
-      pickupQuery,
-      (snap) => {
-        if (!isMounted) return;
-        setPickups(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      },
-      () => toast.error("Failed to load pickups")
-    );
-
-    // ---------- DELIVERY DETAILS (RAW ONLY) ----------
-    const deliveryQuery = query(
+    const q = query(
       collection(db, "deliveryDetails"),
       orderBy("createdAt", "desc")
     );
 
-    unsubDelivery = onSnapshot(
-      deliveryQuery,
+    unsub = onSnapshot(
+      q,
       (snap) => {
-        if (!isMounted) return;
+        if (!alive) return;
 
-        const baseRows = snap.docs.map((d) => {
+        const rows = snap.docs.map((d) => {
           const data = d.data();
-          const addressInfo = data.addressInfo || {};
 
           return {
-            id: d.id,
-            ...data,
+            id: d.id,                // requestId
+            requestId: d.id,
+            itemId: data.itemId,
 
-            // RAW ADDRESS
-            deliveryAddress: addressInfo.address || "—",
-            deliveryPhone: addressInfo.phone || "—",
-            deliveryZip: addressInfo.zipCode || "—",
-            deliveryInstructions: addressInfo.instructions || "",
+            // 🔑 IMPORTANT: buyer === user
+            userId: data.buyerId || data.userId || null,
 
-            // RAW RELATIONS
-            userId: data.userId || null,
-            itemId: data.itemId || null,
+           
 
-            // PLACEHOLDERS ONLY
-            userEmail: null,
+            sellerId: data.sellerId,
+
+            deliveryAddress: data.deliveryAddress || null,
+            deliveryPhone: data.deliveryPhone || null,
+            deliveryInstructions: data.deliveryInstructions || null,
+            addressSubmitted:
+  data.addressSubmitted === true ||
+  (!!data.deliveryAddress && !!data.deliveryPhone),
+
+           
+
+            deliveryStatus: data.deliveryStatus || "pending",
+            pickupStatus: data.pickupStatus || null,
+            forceClosed: data.forceClosed === true,
+
+            createdAt: data.createdAt,
+            updatedAt: data.updatedAt,
+
+            // enrichment
             userName: null,
-            itemData: { title: "Loading item…" },
+            userEmail: null,
+            itemTitle: "Loading item…",
           };
         });
 
-        setRequests(baseRows);
+        setDeliveries(rows);
+        setLastSync(new Date());
         setLoading(false);
       },
       () => toast.error("Failed to load deliveries")
     );
 
     return () => {
-      isMounted = false;
-      if (unsubPickups) unsubPickups();
-      if (unsubDelivery) unsubDelivery();
+      alive = false;
+      if (unsub) unsub();
     };
   }, []);
 
-  // -------------------------------------------------------------
-  // ASYNC ENRICHMENT — USERS + ITEMS (PHASE-2 SAFE)
-  // -------------------------------------------------------------
+  /* -------------------------------------------------------------
+   * PICKUPS (SELLER / DONOR SIDE)
+   * ----------------------------------------------------------- */
   useEffect(() => {
-    if (!requests || requests.length === 0) return;
+    let unsub = null;
+    let alive = true;
 
+    const q = query(
+      collection(db, "pickups"),
+      orderBy("createdAt", "desc")
+    );
+
+    unsub = onSnapshot(
+      q,
+      (snap) => {
+        if (!alive) return;
+        setPickups(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      },
+      () => toast.error("Failed to load pickups")
+    );
+
+    return () => {
+      alive = false;
+      if (unsub) unsub();
+    };
+  }, []);
+
+  /* -------------------------------------------------------------
+   * ENRICH USERS + ITEMS
+   * ----------------------------------------------------------- */
+  useEffect(() => {
+    if (!deliveries.length) return;
     let cancelled = false;
 
     const enrich = async () => {
       try {
         const enriched = await Promise.all(
-          requests.map(async (r) => {
+          deliveries.map(async (r) => {
             const row = { ...r };
 
-            // ---------- USER LOOKUP ----------
             if (row.userId && !row.userName) {
-              const userSnap = await getDoc(doc(db, "users", row.userId));
-              if (userSnap.exists()) {
-                const u = userSnap.data();
-                row.userName = u.displayName || null;
-                row.userEmail = u.email || null;
+              const u = await getDoc(doc(db, "users", row.userId));
+              if (u.exists()) {
+                row.userName = u.data().displayName || null;
+                row.userEmail = u.data().email || null;
               }
             }
 
-            // ---------- ITEM LOOKUP ----------
-            if (row.itemId && row.itemData?.title === "Loading item…") {
-              const itemSnap = await getDoc(doc(db, "donations", row.itemId));
-              if (itemSnap.exists()) {
-                row.itemData = {
-                  title: itemSnap.data().title || "Untitled Item",
-                };
-              } else {
-                row.itemData = { title: "Unknown item" };
-              }
+            if (row.itemId && row.itemTitle === "Loading item…") {
+              const i = await getDoc(doc(db, "donations", row.itemId));
+              row.itemTitle = i.exists()
+                ? i.data().title || "Untitled Item"
+                : "Unknown Item";
             }
 
             return row;
           })
         );
 
-        if (!cancelled) {
-          setRequests(enriched);
-        }
-      } catch (err) {
-        console.error("[AdminPickups] enrichment failed", err);
+        if (!cancelled) setDeliveries(enriched);
+      } catch (e) {
+        console.error("[AdminPickups] enrichment failed", e);
       }
     };
 
     enrich();
+    return () => (cancelled = true);
+  }, [deliveries.length]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [requests.length]);
-
-  // -------------------------------------------------------------
-  // HELPERS
-  // -------------------------------------------------------------
+  /* -------------------------------------------------------------
+   * HELPERS
+   * ----------------------------------------------------------- */
   const formatDate = (v) => {
     if (!v) return "—";
     const d = v.seconds ? new Date(v.seconds * 1000) : new Date(v);
@@ -235,30 +229,22 @@ export default function AdminPickups() {
     });
   };
 
-  const copyToClipboard = (text) => {
-    if (!text) return;
-    navigator.clipboard.writeText(text);
+  const copyToClipboard = (v) => {
+    if (!v) return;
+    navigator.clipboard.writeText(v);
     toast.success("Copied!");
   };
 
-  // ❌ REMOVED: handleUpdateDelivery legacy handler
-  // ❌ REMOVED: handleUpdatePickup legacy handler
-
-  // -------------------------------------------------------------
-  // FILTER RESULTS
-  // -------------------------------------------------------------
-  const filteredData = useMemo(() => {
-    const src = activeView === "pickups" ? pickups : requests;
+  /* -------------------------------------------------------------
+   * FILTER
+   * ----------------------------------------------------------- */
+  const filtered = useMemo(() => {
+    const src =
+      activeView === "pickups" ? pickups : deliveries;
 
     let list = src.filter(
-      (i) => i.deliveryStatus !== "completed" && i.status !== "completed"
+      (i) => i.deliveryStatus !== "completed"
     );
-
-    if (filter) {
-      list = list.filter(
-        (i) => i.deliveryStatus === filter || i.status === filter
-      );
-    }
 
     if (search.trim()) {
       const s = search.toLowerCase();
@@ -268,16 +254,16 @@ export default function AdminPickups() {
           i.userName?.toLowerCase().includes(s) ||
           i.deliveryAddress?.toLowerCase().includes(s) ||
           i.deliveryPhone?.toLowerCase().includes(s) ||
-          i.itemData?.title?.toLowerCase().includes(s)
+          i.itemTitle?.toLowerCase().includes(s)
       );
     }
 
     return list;
-  }, [pickups, requests, filter, search, activeView]);
+  }, [deliveries, pickups, activeView, search]);
 
-  // -------------------------------------------------------------
-  // UI STATES
-  // -------------------------------------------------------------
+  /* -------------------------------------------------------------
+   * UI STATES
+   * ----------------------------------------------------------- */
   if (loading)
     return (
       <div className="flex justify-center items-center min-h-screen text-gray-600">
@@ -290,13 +276,15 @@ export default function AdminPickups() {
       <div className="flex flex-col justify-center items-center min-h-screen">
         <Shield className="text-red-500 w-12 h-12 mb-3" />
         <h2 className="text-xl font-bold">Access Denied</h2>
-        <p className="text-gray-600 mt-1">You do not have admin access.</p>
+        <p className="text-gray-600 mt-1">
+          You do not have admin access.
+        </p>
       </div>
     );
 
-  // =============================================================
-  // RENDER UI
-  // =============================================================
+  /* =============================================================
+   * RENDER
+   * =========================================================== */
   return (
     <div className="flex min-h-screen bg-gray-100 text-gray-800">
       {/* SIDEBAR */}
@@ -316,16 +304,10 @@ export default function AdminPickups() {
           <Link to="/admin" className="block p-2 rounded hover:bg-white/10">
             Dashboard
           </Link>
-          <Link
-            to="/admin/requests"
-            className="block p-2 rounded hover:bg-white/10"
-          >
+          <Link to="/admin/requests" className="block p-2 rounded hover:bg-white/10">
             Requests
           </Link>
-          <Link
-            to="/admin/items"
-            className="block p-2 rounded hover:bg-white/10"
-          >
+          <Link to="/admin/items" className="block p-2 rounded hover:bg-white/10">
             Items
           </Link>
           <Link to="/admin/pickups" className="block p-2 rounded bg-white/20">
@@ -334,7 +316,7 @@ export default function AdminPickups() {
         </nav>
       </aside>
 
-      {/* MAIN CONTENT */}
+      {/* MAIN */}
       <main className="flex-1">
         {/* HEADER */}
         <header className="flex items-center justify-between bg-white shadow px-6 py-4 border-b">
@@ -347,10 +329,7 @@ export default function AdminPickups() {
             </button>
 
             <div className="text-sm text-gray-600 flex items-center gap-1">
-              <Link
-                to="/admin"
-                className="hover:text-indigo-600 flex items-center gap-1"
-              >
+              <Link to="/admin" className="hover:text-indigo-600 flex items-center gap-1">
                 <Home size={14} /> Dashboard
               </Link>
               <ChevronRight size={14} />
@@ -378,17 +357,6 @@ export default function AdminPickups() {
         <section className="p-4 bg-white border-b">
           <div className="flex gap-2">
             <button
-              onClick={() => setActiveView("pickups")}
-              className={`px-4 py-2 rounded-lg font-medium ${
-                activeView === "pickups"
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-200 text-gray-700"
-              }`}
-            >
-              📦 Pickup Records
-            </button>
-
-            <button
               onClick={() => setActiveView("deliveries")}
               className={`px-4 py-2 rounded-lg font-medium ${
                 activeView === "deliveries"
@@ -396,19 +364,29 @@ export default function AdminPickups() {
                   : "bg-gray-200 text-gray-700"
               }`}
             >
-              🚚 Delivery Requests
+              <Truck size={14} className="inline mr-1" />
+              Buyer Deliveries
+            </button>
+
+            <button
+              onClick={() => setActiveView("pickups")}
+              className={`px-4 py-2 rounded-lg font-medium ${
+                activeView === "pickups"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-200 text-gray-700"
+              }`}
+            >
+              <Package size={14} className="inline mr-1" />
+              Seller Pickups
             </button>
           </div>
         </section>
 
-        {/* DATA LIST */}
+        {/* LIST */}
         <section className="p-8">
           <div className="bg-white rounded-lg shadow p-6 border">
             <div className="relative mb-6">
-              <Search
-                className="absolute left-3 top-3 text-gray-400"
-                size={16}
-              />
+              <Search className="absolute left-3 top-3 text-gray-400" size={16} />
               <input
                 type="text"
                 placeholder="Search email, phone, item, name…"
@@ -418,15 +396,20 @@ export default function AdminPickups() {
             </div>
 
             <div className="grid gap-4">
-              {filteredData.map((item) => (
-                <DeliveryItem
-                  key={item.id}
-                  request={item}
-                  formatDate={formatDate}
-                  copyToClipboard={copyToClipboard}
-                  refetchDeliveries={() => {}}
-                />
-              ))}
+              {filtered.map((item) =>
+                activeView === "deliveries" ? (
+                  <DeliveryItem
+                    key={item.id}
+                    request={item}
+                    formatDate={formatDate}
+                    copyToClipboard={copyToClipboard}
+                  />
+                ) : (
+                  <div key={item.id} className="border p-4 rounded">
+                    Seller pickup record
+                  </div>
+                )
+              )}
             </div>
           </div>
         </section>
@@ -435,26 +418,47 @@ export default function AdminPickups() {
   );
 }
 
-// =============================================================
-// DELIVERY ITEM COMPONENT — PHASE 2 (ADMIN, FINAL, LOCKED)
-// =============================================================
-
-const DeliveryItem = ({
-  request,
-  formatDate,
-  copyToClipboard,
-  refetchDeliveries, // 🔁 refresh after admin action
-}) => {
-  const displayUser =
-    request.userName || request.userEmail || "Unknown User";
-
+/* =============================================================
+ * DELIVERY ITEM (BUYER SIDE)
+ * =========================================================== */
+const DeliveryItem = ({ request, formatDate, copyToClipboard }) => {
   // --------------------------------------------------
-  // TERMINAL GUARD (Phase-2 authority)
+  // PHASE-2 FLAGS (EXPLICIT & SAFE)
   // --------------------------------------------------
-  const isTerminal =
-    request.forceClosed === true ||
-    request.deliveryStatus === "completed" ||
-    request.deliveryStatus === "force_closed";
+  const addressReady =
+    request.addressSubmitted === true ||
+    (!!request.deliveryAddress && !!request.deliveryPhone);
+
+
+    const isClosed =
+  request.forceClosed === true ||
+  request.deliveryStatus === "completed" ||
+  request.deliveryStatus === "force_closed";
+
+const canPickupConfirm =
+  addressReady &&
+  !isClosed &&
+  request.pickupStatus === "pickupRequested";
+
+  const canTransit =
+  !isClosed &&
+  request.pickupStatus === "pickupConfirmed" &&
+  request.deliveryStatus !== "in_transit";
+
+
+
+
+const canDeliver =
+  !isClosed &&
+  request.deliveryStatus === "in_transit";
+
+  const canBackfill =
+  !request.deliveryStatus ||
+  request.deliveryStatus === "pending";
+
+
+
+ 
 
   return (
     <div className="border rounded-xl bg-white p-4 shadow-sm flex flex-col sm:flex-row justify-between gap-4">
@@ -462,137 +466,114 @@ const DeliveryItem = ({
          LEFT: DELIVERY DETAILS
       ================================================== */}
       <div className="flex-1">
-        {/* ITEM */}
-        <p className="font-medium text-gray-800">
+        <p className="font-medium">
           Item:{" "}
           <span className="text-indigo-700">
-            {request.itemData?.title || "Unknown Item"}
+            {request.itemTitle || "Unknown Item"}
           </span>
         </p>
 
-        {/* USER */}
-        <div className="mt-2 text-sm text-gray-700 space-y-2">
+        <div className="mt-2 text-sm space-y-2">
           <p className="flex items-center gap-1">
             <User size={14} />
-            <b>{displayUser}</b>
+            <b>{request.userName || request.userEmail || "Unknown User"}</b>
           </p>
 
-          <p className="text-xs text-gray-500">User ID: {request.userId}</p>
-
-          {/* ADDRESS */}
-          {request.deliveryAddress && (
-            <div className="flex items-start gap-2">
-              <MapPin size={14} className="mt-1 text-gray-500" />
-              <div className="flex flex-col">
+          {addressReady ? (
+            <>
+              <div className="flex items-start gap-2">
+                <MapPin size={14} />
                 <span
-                  onClick={() => copyToClipboard(request.deliveryAddress)}
-                  className="cursor-pointer whitespace-pre-wrap break-words leading-relaxed hover:text-indigo-600"
+                  className="cursor-pointer hover:text-indigo-600"
+                  onClick={() =>
+                    copyToClipboard(request.deliveryAddress)
+                  }
                 >
                   {request.deliveryAddress}
                 </span>
-
-                {request.deliveryZip && (
-                  <span className="text-xs text-gray-500">
-                    ZIP: {request.deliveryZip}
-                  </span>
-                )}
-
-                <button
-                  onClick={() => copyToClipboard(request.deliveryAddress)}
-                  className="mt-1 text-xs text-indigo-600 underline w-fit"
-                >
-                  Copy Address
-                </button>
               </div>
-            </div>
-          )}
 
-          {/* PHONE */}
-          {request.deliveryPhone && (
-            <div className="flex items-center gap-2">
-              <Phone size={14} className="text-gray-500" />
-              <span
-                className="cursor-pointer hover:text-indigo-600"
-                onClick={() => copyToClipboard(request.deliveryPhone)}
-              >
-                {request.deliveryPhone}
-              </span>
-            </div>
-          )}
+              <div className="flex items-center gap-2">
+                <Phone size={14} />
+                <span
+                  className="cursor-pointer hover:text-indigo-600"
+                  onClick={() =>
+                    copyToClipboard(request.deliveryPhone)
+                  }
+                >
+                  {request.deliveryPhone}
+                </span>
+              </div>
 
-          {/* INSTRUCTIONS */}
-          {request.deliveryInstructions && (
-            <div className="flex items-start gap-2">
-              <MessageSquare size={14} className="text-gray-500" />
-              <span className="whitespace-pre-wrap break-words leading-relaxed">
-                {request.deliveryInstructions}
-              </span>
+              {request.deliveryInstructions && (
+                <div className="flex items-start gap-2">
+                  <MessageSquare size={14} />
+                  <span>{request.deliveryInstructions}</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-xs text-amber-600 font-medium">
+              ⏳ Waiting for recipient to submit address
             </div>
-          )}
-
-          {/* ITEM LINK */}
-          {request.itemId && (
-            <Link
-              to={`/admin/items?id=${request.itemId}`}
-              className="text-xs underline text-indigo-600 mt-1 inline-block"
-            >
-              View Item →
-            </Link>
           )}
         </div>
 
-        {/* TIMESTAMPS */}
         <div className="mt-3 text-xs text-gray-500 space-y-1">
-          <p className="flex items-center gap-1">
-            <Clock size={12} />
-            Created: {formatDate(request.createdAt)}
-          </p>
-          <p className="flex items-center gap-1">
-            <Calendar size={12} />
-            Updated: {formatDate(request.updatedAt)}
-          </p>
+          <p>Created: {formatDate(request.createdAt)}</p>
+          <p>Updated: {formatDate(request.updatedAt)}</p>
         </div>
 
-        {/* TERMINAL NOTICE */}
-        {isTerminal && (
-          <div className="mt-2 text-xs font-medium text-red-600">
-            🔒 Delivery permanently closed
-          </div>
-        )}
       </div>
 
       {/* ==================================================
-         RIGHT: ADMIN ACTIONS
+         RIGHT: ADMIN CONTROLS
       ================================================== */}
       <div className="flex flex-col gap-3 min-w-[240px]">
-        {/* STATUS + TIMELINE */}
         <StatusBadge
-          status={request.deliveryStatus}
-          pickupStatus={request.pickupStatus}
-          showTimeline={!isTerminal}
-        />
+  deliveryStatus={request.deliveryStatus}
+  pickupStatus={request.pickupStatus}
+  forceClosed={request.forceClosed}
+  showTimeline={!isClosed}
+/>
 
-        {/* ===============================
-           PHASE-2 ADMIN DELIVERY ACTIONS
-        =============================== */}
+     
 
-        {/* ADMIN PICKUP CONFIRMATION */}
-        <AdminPickupConfirmation
-          delivery={request}
-          isAdmin={true}
-        />
 
-        {/* ADMIN DELIVERY ACTIONS */}
-        <AdminDeliveryActions
-          delivery={request}
-          isAdmin={true}
-        />
+        {/* ADMIN ACTIONS — PHASE-2 AUTHORITY */}
+       {canPickupConfirm && (
+  <AdminPickupConfirmation delivery={request} isAdmin />
+)}
 
-        {/* ADMIN FORCE CLOSE PANEL */}
-        <AdminForceClosePanel
-          delivery={request}
-          isAdmin={true}
-        />
+{(canTransit || canDeliver) && (
+  <AdminDeliveryActions delivery={request} isAdmin />
+)}
+
+{/* ADMIN BACKFILL — PHASE-2 SAFE (ONLY IF MISSING / LEGACY) */}
+{canBackfill && (
+  <button
+    onClick={async () => {
+      try {
+        await adminBackfillDelivery({
+          itemId: request.itemId,
+        });
+        toast.success("Delivery backfilled");
+      } catch (e) {
+        toast.error(
+          e?.message || "Failed to backfill delivery"
+        );
+      }
+    }}
+    className="text-xs px-3 py-2 rounded bg-amber-600 text-white hover:bg-amber-700"
+  >
+    Backfill Delivery
+  </button>
+)}
+
+        {/* FORCE CLOSE — ALWAYS AVAILABLE UNLESS ALREADY CLOSED */}
+        {!request.forceClosed && (
+          <AdminForceClosePanel delivery={request} isAdmin />
+        )}
       </div>
     </div>
   );

@@ -1,39 +1,51 @@
-// ✅ FILE: src/components/MyActivity/RecipientConfirmDelivery.js
+// ========================================================================
+// FILE: src/components/MyActivity/RecipientConfirmDelivery.js
 // PHASE-2 FINAL — Backend-authoritative recipient confirmation
+// ========================================================================
 
 import React, { useState } from "react";
 import { recipientConfirmDelivery } from "../../services/functionsApi";
 import { CheckCircle, XCircle, Loader2 } from "lucide-react";
+import toast from "react-hot-toast";
 
-const RecipientConfirmDelivery = ({ request, onDone }) => {
+const RecipientConfirmDelivery = ({ donation, onDone }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  if (!request) return null;
+  if (!donation) return null;
 
   const handleConfirm = async (accepted) => {
+    if (!donation.id) {
+      setError("Invalid donation reference.");
+      return;
+    }
+
     setLoading(true);
     setError("");
 
     try {
       await recipientConfirmDelivery({
-        requestId: request.id,   // 🔥 MUST be requestId
+        donationId: donation.id, // ✅ PHASE-2 AUTHORITATIVE
         accepted,
+        estimatedCost:
+          donation.deliveryCostEstimate ??
+          donation.estimatedDelivery?.max ??
+          donation.estimatedDelivery?.min ??
+          null,
       });
 
-      if (accepted) {
-        window?.toast?.success?.("✅ Delivery confirmed!");
-      } else {
-        window?.toast?.success?.("❌ Item declined.");
-      }
+      toast.success(
+        accepted
+          ? "✅ Delivery accepted. Pickup scheduling will begin."
+          : "❌ You declined this item."
+      );
 
-      onDone?.(request);
-
+      onDone?.(donation);
     } catch (err) {
       console.error("❌ RecipientConfirmDelivery error:", err);
       setError(
         err?.message ||
-        "Failed to confirm delivery. Please try again."
+          "Failed to confirm delivery. Please try again."
       );
     } finally {
       setLoading(false);
@@ -43,7 +55,7 @@ const RecipientConfirmDelivery = ({ request, onDone }) => {
   return (
     <div className="mt-4 p-4 border rounded-lg bg-gray-50">
       <p className="text-sm text-gray-700 mb-3">
-        Please confirm whether you accept this item and want delivery to proceed.
+        Please confirm whether you want to receive this item and proceed with delivery.
       </p>
 
       {error && (
@@ -56,7 +68,7 @@ const RecipientConfirmDelivery = ({ request, onDone }) => {
         <button
           disabled={loading}
           onClick={() => handleConfirm(true)}
-          className="flex-1 py-2 bg-green-600 text-white rounded-lg flex items-center justify-center gap-2"
+          className="flex-1 py-2 bg-green-600 text-white rounded-lg flex items-center justify-center gap-2 disabled:opacity-60"
         >
           {loading ? (
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -69,7 +81,7 @@ const RecipientConfirmDelivery = ({ request, onDone }) => {
         <button
           disabled={loading}
           onClick={() => handleConfirm(false)}
-          className="flex-1 py-2 bg-red-600 text-white rounded-lg flex items-center justify-center gap-2"
+          className="flex-1 py-2 bg-red-600 text-white rounded-lg flex items-center justify-center gap-2 disabled:opacity-60"
         >
           {loading ? (
             <Loader2 className="w-4 h-4 animate-spin" />

@@ -1,109 +1,134 @@
 // ✅ FILE: src/components/DeliveryForm.jsx
+// PHASE-2 FINAL — UI-only address collector (backend handled by parent)
+
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { useAuth } from "../contexts/AuthContext";
 
-const DeliveryForm = ({ request = null, onSubmit, onCancel, existingData = {} }) => {
+const DeliveryForm = ({
+  request = null,
+  onSubmit,
+  onCancel,
+  existingData = {},
+}) => {
   const { currentUser } = useAuth();
 
   const fallbackData = currentUser?.defaultAddress || {};
+
   const [formData, setFormData] = useState({
     zipCode: existingData.zipCode || fallbackData.zipCode || "",
     address: existingData.address || fallbackData.address || "",
     roomNumber: existingData.roomNumber || fallbackData.roomNumber || "",
     phone: existingData.phone || fallbackData.phone || "",
+    instructions: existingData.instructions || "",
   });
 
-  const [loading, setLoading] = useState(false);
+  const [loadingZip, setLoadingZip] = useState(false);
   const [error, setError] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // ✅ Auto-fetch address from zipcloud when ZIP is 7 digits
+  /* --------------------------------------------------
+   * ZIP AUTO LOOKUP (Japan)
+   * -------------------------------------------------- */
   useEffect(() => {
-    if (formData.zipCode.length === 7 && /^\d+$/.test(formData.zipCode)) {
-      const timer = setTimeout(async () => {
-        try {
-          setLoading(true);
-          setError("");
-          const res = await axios.get(
-            `https://zipcloud.ibsnet.co.jp/api/search?zipcode=${formData.zipCode}`
-          );
-
-          if (res.data?.results) {
-            setSuggestions(res.data.results);
-            if (res.data.results.length === 1) {
-              const r = res.data.results[0];
-              setFormData((prev) => ({
-                ...prev,
-                address: `${r.address1} ${r.address2} ${r.address3}`,
-              }));
-            }
-          } else {
-            setError("No address found for this ZIP code.");
-          }
-        } catch (err) {
-          console.error("ZIP lookup error:", err);
-          setError("ZIP code lookup failed. Please enter manually.");
-        } finally {
-          setLoading(false);
-        }
-      }, 600);
-      return () => clearTimeout(timer);
+    if (formData.zipCode.length !== 7 || !/^\d+$/.test(formData.zipCode)) {
+      return;
     }
+
+    const timer = setTimeout(async () => {
+      try {
+        setLoadingZip(true);
+        setError("");
+
+        const res = await axios.get(
+          `https://zipcloud.ibsnet.co.jp/api/search?zipcode=${formData.zipCode}`
+        );
+
+        if (res.data?.results?.length) {
+          setSuggestions(res.data.results);
+
+          if (res.data.results.length === 1) {
+            const r = res.data.results[0];
+            setFormData((prev) => ({
+              ...prev,
+              address: `${r.address1} ${r.address2} ${r.address3}`,
+            }));
+          }
+        } else {
+          setError("No address found for this ZIP code.");
+        }
+      } catch (err) {
+        console.error("ZIP lookup error:", err);
+        setError("ZIP lookup failed. Enter address manually.");
+      } finally {
+        setLoadingZip(false);
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
   }, [formData.zipCode]);
 
+  /* --------------------------------------------------
+   * CHANGE HANDLER
+   * -------------------------------------------------- */
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  // ✅ Unified submit handler (supports both MyRequests + Payment modal)
+  /* --------------------------------------------------
+   * SUBMIT (UI → PARENT ONLY)
+   * -------------------------------------------------- */
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
 
     if (!formData.zipCode || !formData.address || !formData.phone) {
-      setError("ZIP Code, Address, and Phone are required.");
+      setError("ZIP code, address, and phone are required.");
       return;
     }
 
-    if (formData.zipCode.length !== 7 || !/^\d{7}$/.test(formData.zipCode)) {
+    if (!/^\d{7}$/.test(formData.zipCode)) {
       setError("ZIP code must be 7 digits.");
       return;
     }
 
     if (!/^\d{10,15}$/.test(formData.phone)) {
-      setError("Enter a valid phone number (10–15 digits, numbers only).");
+      setError("Enter a valid phone number (10–15 digits).");
       return;
     }
 
     try {
       setSubmitting(true);
-      const data = {
-        zipCode: formData.zipCode.trim(),
-        address: formData.address.trim(),
-        roomNumber: formData.roomNumber?.trim() || null,
-        phone: formData.phone.trim(),
-        submittedAt: new Date().toISOString(),
+
+      // 🔑 PHASE-2 CANONICAL PAYLOAD
+      const payload = {
+        deliveryAddress: `${formData.zipCode} ${formData.address}${
+          formData.roomNumber ? ` ${formData.roomNumber}` : ""
+        }`.trim(),
+        deliveryPhone: formData.phone.trim(),
+        deliveryInstructions: formData.instructions?.trim() || "",
       };
 
-      // ✅ Handle both use cases
       if (typeof onSubmit === "function") {
         if (request?.id) {
-          await onSubmit(request.id, data); // MyRequests page
+          await onSubmit(request.id, payload);
         } else {
-          await onSubmit(data); // Deposit modal
+          await onSubmit(payload);
         }
       }
     } catch (err) {
-      console.error("DeliveryForm submission failed:", err);
-      setError("Failed to save address. Try again.");
+      console.error("DeliveryForm submit failed:", err);
+      setError("Failed to save address. Please try again.");
     } finally {
       setSubmitting(false);
     }
   };
 
+  /* --------------------------------------------------
+   * UI
+   * -------------------------------------------------- */
   return (
     <form
       onSubmit={handleSubmit}
@@ -128,14 +153,13 @@ const DeliveryForm = ({ request = null, onSubmit, onCancel, existingData = {} })
             value={formData.zipCode}
             onChange={handleChange}
             maxLength="7"
-            pattern="\d{7}"
             required
             className="w-full border rounded px-3 py-2 text-sm"
-            placeholder="e.g. 1234567"
+            placeholder="1234567"
           />
-          {loading && (
+          {loadingZip && (
             <p className="text-xs text-gray-500 mt-1">
-              Looking up address...
+              Looking up address…
             </p>
           )}
         </div>
@@ -163,28 +187,25 @@ const DeliveryForm = ({ request = null, onSubmit, onCancel, existingData = {} })
           onChange={handleChange}
           required
           className="w-full border rounded px-3 py-2 text-sm"
-          placeholder="Tokyo-to, Chiyoda-ku..."
         />
+
         {suggestions.length > 1 && (
-          <div className="mt-1 text-xs">
-            <p>Select an address:</p>
-            <ul className="border rounded mt-1 divide-y">
-              {suggestions.map((item, i) => (
-                <li
-                  key={i}
-                  className="p-2 hover:bg-gray-100 cursor-pointer"
-                  onClick={() =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      address: `${item.address1} ${item.address2} ${item.address3}`,
-                    }))
-                  }
-                >
-                  {item.address1} {item.address2} {item.address3}
-                </li>
-              ))}
-            </ul>
-          </div>
+          <ul className="border rounded mt-1 divide-y text-xs">
+            {suggestions.map((s, i) => (
+              <li
+                key={i}
+                className="p-2 hover:bg-gray-100 cursor-pointer"
+                onClick={() =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    address: `${s.address1} ${s.address2} ${s.address3}`,
+                  }))
+                }
+              >
+                {s.address1} {s.address2} {s.address3}
+              </li>
+            ))}
+          </ul>
         )}
       </div>
 
@@ -198,16 +219,29 @@ const DeliveryForm = ({ request = null, onSubmit, onCancel, existingData = {} })
           value={formData.roomNumber}
           onChange={handleChange}
           className="w-full border rounded px-3 py-2 text-sm"
-          placeholder="Room 201"
         />
       </div>
 
-      <div className="flex justify-end space-x-3 mt-5">
+      <div className="mt-3">
+        <label className="block text-sm font-medium mb-1">
+          Instructions (Optional)
+        </label>
+        <input
+          type="text"
+          name="instructions"
+          value={formData.instructions}
+          onChange={handleChange}
+          className="w-full border rounded px-3 py-2 text-sm"
+          placeholder="Gate code, landmark, etc."
+        />
+      </div>
+
+      <div className="flex justify-end gap-3 mt-5">
         {onCancel && (
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 border rounded text-sm text-gray-700 hover:bg-gray-100"
+            className="px-4 py-2 border rounded text-sm"
           >
             Cancel
           </button>
@@ -215,9 +249,9 @@ const DeliveryForm = ({ request = null, onSubmit, onCancel, existingData = {} })
         <button
           type="submit"
           disabled={submitting}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded text-sm disabled:opacity-50"
+          className="bg-indigo-600 text-white px-4 py-2 rounded text-sm disabled:opacity-50"
         >
-          {submitting ? "Saving..." : "Save Address"}
+          {submitting ? "Saving…" : "Save Address"}
         </button>
       </div>
     </form>

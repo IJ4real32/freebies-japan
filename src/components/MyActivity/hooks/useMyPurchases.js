@@ -1,24 +1,34 @@
 // FILE: src/components/MyActivity/hooks/useMyPurchases.js
 
 import { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { 
+  collection, 
+  query, 
+  where, 
+  onSnapshot,
+  doc,
+  getDoc 
+} from 'firebase/firestore';
 import { db } from '../../../firebase';
 
-const fetchDocsByIds = async (collectionName, ids) => {
+// Safe fetch function with individual error handling
+const safeFetchDocsByIds = async (collectionName, ids) => {
   if (!ids.length) return [];
-  const docs = await Promise.all(
-    ids.map(async (id) => {
-      try {
-        const docRef = doc(db, collectionName, id);
-        const docSnap = await getDoc(docRef);
-        return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null;
-      } catch (error) {
-        console.warn(`Permission denied for ${collectionName}/${id}`);
-        return null;
+  
+  const docs = [];
+  for (const id of ids) {
+    try {
+      const docRef = doc(db, collectionName, id);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        docs.push({ id: docSnap.id, ...docSnap.data() });
       }
-    })
-  );
-  return docs.filter(Boolean);
+    } catch (error) {
+      // Silent permission fallback - don't crash
+      console.warn(`Permission denied for ${collectionName}/${id}:`, error.code);
+    }
+  }
+  return docs;
 };
 
 export default function useMyPurchases(uid) {
@@ -47,26 +57,22 @@ export default function useMyPurchases(uid) {
               id: d.id,
               ...d.data(),
             }))
-            .filter((p) => p.userId === uid); // Additional safety filter
+            .filter((p) => p.userId === uid);
 
           const itemIds = [...new Set(baseList.map((p) => p.itemId).filter(Boolean))];
 
-          // ✅ FIX: Safe deliveryDetails fetch with try-catch
+          // 🔴 CRITICAL FIX: DO NOT fetch deliveryDetails for purchases
+          // COD payments don't have deliveryDetails immediately
+          // Only fetch donations
+          
           let donations = [];
-          let deliveries = [];
-
-          try {
-            donations = await fetchDocsByIds('donations', itemIds);
-          } catch (donationErr) {
-            console.warn('Donation fetch blocked', donationErr);
-            donations = [];
-          }
-
-          try {
-            deliveries = await fetchDocsByIds('deliveryDetails', itemIds);
-          } catch (deliveryErr) {
-            console.warn('deliveryDetails fetch blocked by rules');
-            deliveries = [];
+          if (itemIds.length > 0) {
+            try {
+              donations = await safeFetchDocsByIds('donations', itemIds);
+            } catch (donationErr) {
+              console.warn('Donation fetch blocked', donationErr);
+              donations = [];
+            }
           }
 
           const donationMap = donations.reduce((acc, d) => {
@@ -74,20 +80,16 @@ export default function useMyPurchases(uid) {
             return acc;
           }, {});
 
-          const deliveryMap = deliveries.reduce((acc, d) => {
-            if (d) acc[d.id] = d;
-            return acc;
-          }, {});
-
+          // 🔴 IMPORTANT: DO NOT include deliveryData for purchases
+          // Delivery details are fetched separately when needed
           const enhanced = baseList.map((purchase) => {
             const donation = donationMap[purchase.itemId] || null;
-            const deliveryData = deliveryMap[purchase.itemId] || null;
-
+            
             return {
               ...purchase,
               donation,
-              deliveryData,
               isPremium: true,
+              // 🔴 NO deliveryData here - it's fetched separately if needed
             };
           });
 

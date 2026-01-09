@@ -1,6 +1,6 @@
 // ===================================================================
 // AdminPickupConfirmation.jsx
-// PHASE-2 FINAL — Admin confirms seller pickup date (AUTHORITATIVE)
+// PHASE-2 FINAL — Admin confirms seller pickup date
 // ===================================================================
 
 import React, { useState } from "react";
@@ -13,16 +13,20 @@ export default function AdminPickupConfirmation({ delivery, isAdmin }) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // ------------------------------------------------------------------
-  // HARD GUARDS — Phase-2 rules
-  // ------------------------------------------------------------------
+  // --------------------------------------------------
+  // HARD GUARDS — PHASE-2 CORRECT
+  // --------------------------------------------------
   if (!isAdmin) return null;
   if (!delivery) return null;
 
-  if (delivery.pickupStatus !== "awaiting_admin") {
-    return null;
-  }
+  // Address must exist (award accepted)
+  const addressReady =
+    delivery.addressSubmitted === true ||
+    (!!delivery.deliveryAddress && !!delivery.deliveryPhone);
 
+  if (!addressReady) return null;
+
+  // Seller must have proposed pickup dates
   if (
     !Array.isArray(delivery.proposedPickupDates) ||
     delivery.proposedPickupDates.length === 0
@@ -30,6 +34,18 @@ export default function AdminPickupConfirmation({ delivery, isAdmin }) {
     return null;
   }
 
+  // Do not show if already confirmed or terminal
+  if (
+    delivery.pickupStatus === "confirmed" ||
+    delivery.deliveryStatus === "completed" ||
+    delivery.deliveryStatus === "force_closed"
+  ) {
+    return null;
+  }
+
+  // --------------------------------------------------
+  // CONFIRM PICKUP DATE
+  // --------------------------------------------------
   const handleConfirm = async () => {
     if (!selectedDate) {
       toast.error("Please select a pickup date");

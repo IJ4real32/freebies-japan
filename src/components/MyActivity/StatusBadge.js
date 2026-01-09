@@ -12,21 +12,20 @@ import {
   Calendar,
   Truck,
   Package,
-  Bike,
   CreditCard,
   Crown,
 } from "lucide-react";
 
 const StatusBadge = ({
-  status,
-  deliveryStatus,
+  status,            // premium / listing only
+  deliveryStatus,    // AUTHORITATIVE for FREE items
   isPremium = false,
   isListing = false,
   size = "sm",
   showTimeline = false,
 }) => {
   /* ==========================================================
-     PREMIUM CONFIG — LOCKED
+     PREMIUM CONFIG — LOCKED (UNCHANGED)
   ========================================================== */
   const premiumConfig = {
     available: {
@@ -83,28 +82,10 @@ const StatusBadge = ({
       label: "Completed",
       step: 7,
     },
-    buyerDeclined: {
-      color: "bg-red-100 text-red-800 border-red-200",
-      icon: XCircle,
-      label: "Buyer Declined",
-      step: -1,
-    },
-    buyerDeclinedAtDoor: {
-      color: "bg-red-200 text-red-900 border-red-300",
-      icon: XCircle,
-      label: "Declined at Door",
-      step: -1,
-    },
     cancelled: {
       color: "bg-gray-100 text-gray-700 border-gray-300",
       icon: XCircle,
       label: "Cancelled",
-      step: -1,
-    },
-    autoClosed: {
-      color: "bg-gray-100 text-gray-700 border-gray-300",
-      icon: Clock,
-      label: "Auto Closed",
       step: -1,
     },
     force_closed: {
@@ -122,7 +103,7 @@ const StatusBadge = ({
   };
 
   /* ==========================================================
-     FREE CONFIG — UI STATES ONLY
+     FREE CONFIG — UI STATES ONLY (AUTHORITATIVE)
   ========================================================== */
   const freeConfig = {
     pending: {
@@ -131,47 +112,23 @@ const StatusBadge = ({
       label: "Pending",
       step: 0,
     },
-    approved: {
-      color: "bg-blue-100 text-blue-800 border-blue-200",
-      icon: UserCheck,
-      label: "Approved",
-      step: 1,
-    },
-    awarded: {
-      color: "bg-purple-100 text-purple-800 border-purple-200",
-      icon: Award,
-      label: "Awarded",
-      step: 2,
-    },
     accepted: {
       color: "bg-green-100 text-green-800 border-green-200",
-      icon: CheckCircle,
+      icon: UserCheck,
       label: "Accepted",
-      step: 3,
+      step: 2,
     },
     in_transit: {
       color: "bg-purple-100 text-purple-800 border-purple-200",
       icon: Truck,
       label: "In Transit",
-      step: 5,
-    },
-    delivered: {
-      color: "bg-emerald-100 text-emerald-800 border-emerald-200",
-      icon: Package,
-      label: "Delivered",
-      step: 7,
+      step: 4,
     },
     completed: {
       color: "bg-teal-100 text-teal-800 border-teal-200",
       icon: CheckCircle,
       label: "Completed",
-      step: 8,
-    },
-    rejected: {
-      color: "bg-red-100 text-red-800 border-red-200",
-      icon: XCircle,
-      label: "Rejected",
-      step: -1,
+      step: 6,
     },
     cancelled: {
       color: "bg-gray-100 text-gray-800 border-gray-200",
@@ -188,27 +145,26 @@ const StatusBadge = ({
   };
 
   /* ==========================================================
-     FREE STATUS RESOLVER — PHASE-2 AUTHORITATIVE
+     FREE STATUS RESOLVER — PHASE-2 CANONICAL
+     deliveryDetails.deliveryStatus is the ONLY source of truth
   ========================================================== */
-  const terminalStates = ["rejected", "cancelled", "force_closed"];
+  const freeStatusMap = {
+    pending: "pending",
+    recipient_accepted: "accepted",
+    pickup_requested: "accepted",
+    pickup_confirmed: "accepted",
+    in_transit: "in_transit",
+    completed: "completed",
+    cancelled: "cancelled",
+    force_closed: "force_closed",
+  };
 
-  const normalize = (v) =>
-    (v || "").toLowerCase().replace(/[-_]/g, "");
+  const resolvedFreeStatus =
+    freeStatusMap[deliveryStatus] || "pending";
 
-  const normalizedDelivery = normalize(deliveryStatus);
-
-  const resolvedFreeStatus = terminalStates.includes(status)
-    ? status
-    : normalizedDelivery.includes("intransit")
-    ? "in_transit"
-    : normalizedDelivery.includes("delivered")
-    ? "delivered"
-    : normalizedDelivery.includes("completed")
-    ? "completed"
-    : normalizedDelivery
-    ? "accepted"
-    : status || "pending";
-
+  /* ==========================================================
+     FINAL CONFIG RESOLUTION
+  ========================================================== */
   const cfg = isPremium
     ? premiumConfig[status] || premiumConfig.unknown
     : freeConfig[resolvedFreeStatus] || freeConfig.pending;
@@ -222,8 +178,10 @@ const StatusBadge = ({
     lg: "px-4 py-2 text-base",
   };
 
-  const showProgress = showTimeline && !isTerminal && !isListing;
-  const pipelineSteps = 9;
+  const showProgress =
+    showTimeline && !isTerminal && !isListing;
+
+  const pipelineSteps = 7;
 
   return (
     <div className="flex flex-col gap-1">

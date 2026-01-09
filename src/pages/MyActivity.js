@@ -20,6 +20,7 @@ import {
 
 import { db, functions } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
+import useMyListings from "../components/MyActivity/hooks/useMyListings";
 
 // CARDS
 import RequestCard from "../components/MyActivity/RequestCard";
@@ -37,6 +38,32 @@ import AddressConfirmationModal from "../components/MyActivity/AddressConfirmati
 
 import { Gift, ShoppingBag, List, Plus, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
+
+// ======================================================================
+// ERROR TRACKING (TEMPORARY - FOR DEBUGGING)
+// ======================================================================
+
+// Override console.error to capture all Firebase errors
+const originalError = console.error;
+console.error = function(...args) {
+  // Check if it's a Firebase permission error
+  if (args[0]?.message?.includes?.('Missing or insufficient permissions') ||
+      args[0]?.code === 'permission-denied') {
+    console.warn('🔴 CAPTURED FIREBASE PERMISSION ERROR:', {
+      error: args[0],
+      stack: new Error().stack, // Get call stack
+      timestamp: new Date().toISOString()
+    });
+  }
+  originalError.apply(console, args);
+};
+
+// Log all Firestore operations
+const logFirestoreOp = (operation, path, success = true) => {
+  if (!success) {
+    console.warn(`🔴 Firestore ${operation} failed: ${path}`);
+  }
+};
 
 // ======================================================================
 // HELPERS
@@ -141,11 +168,12 @@ export default function MyActivity() {
   // -------------------------------------
   const [requests, setRequests] = useState([]);
   const [purchases, setPurchases] = useState([]);
-  const [listings, setListings] = useState([]);
+  const listings = useMyListings(currentUser?.uid);
+
+  
   const [dataLoading, setDataLoading] = useState({
     requests: true,
     purchases: true,
-    listings: true
   });
 
   // ======================================================================
@@ -242,10 +270,21 @@ export default function MyActivity() {
         }, {});
 
         // Enhanced requests with donations
-        const enhancedRequests = requestsData.map(req => ({
-          ...req,
-          donation: donationLookup[req.itemId] || null,
-        }));
+       const enhancedRequests = requestsData.map(req => ({
+  ...req,
+  donation: donationLookup[req.itemId] || null,
+
+  // 🔑 Phase-2 authoritative delivery mirror (FREE items)
+  deliveryData: {
+    deliveryStatus: req.deliveryStatus || null,
+    deliveryAddress: req.deliveryAddress || null,
+    deliveryPhone: req.deliveryPhone || null,
+    addressSubmitted:
+      req.addressSubmitted === true ||
+      (!!req.deliveryAddress && !!req.deliveryPhone),
+  },
+}));
+
 
         if (mounted) {
           setRequests(enhancedRequests);
@@ -324,10 +363,15 @@ export default function MyActivity() {
 
         // Enhanced purchases with donations
         const enhancedPurchases = purchasesData.map(purchase => ({
-          ...purchase,
-          donation: donationLookup[purchase.itemId] || null,
-          isPremium: true,
-        }));
+  ...purchase,
+  donation: donationLookup[purchase.itemId] || null,
+  isPremium: true,
+
+  // 🔒 Phase-2: delivery may not exist yet (COD)
+  deliveryData: null,
+}));
+
+        
 
         if (mounted) {
           setPurchases(enhancedPurchases);
@@ -351,85 +395,7 @@ export default function MyActivity() {
     };
   }, [currentUser?.uid]);
 
-  // Fetch listings (with safe deliveryDetails handling)
-  useEffect(() => {
-    if (!currentUser?.uid) {
-      setListings([]);
-      setDataLoading(prev => ({ ...prev, listings: false }));
-      return;
-    }
-
-    let mounted = true;
-
-    const fetchListings = async () => {
-      try {
-        setDataLoading(prev => ({ ...prev, listings: true }));
-        
-        // Fetch user's listings
-        const listingsQuery = query(
-          collection(db, "donations"),
-          where("donorId", "==", currentUser.uid)
-        );
-        
-        const listingsSnap = await getDocs(listingsQuery);
-        const listingsData = listingsSnap.docs.map(doc => ({ 
-          id: doc.id, 
-          ...doc.data() 
-        }));
-
-        // Enhanced listings with request info (safe)
-        const enhancedListings = await Promise.all(
-          listingsData.map(async (listing) => {
-            let requestStatus = null;
-            let hasActiveRequest = false;
-
-            // Try to find associated request (silent fail on permissions)
-            try {
-              const requestsQuery = query(
-                collection(db, "requests"),
-                where("itemId", "==", listing.id),
-                where("status", "in", ["awarded", "accepted"])
-              );
-              const requestsSnap = await getDocs(requestsQuery);
-              if (!requestsSnap.empty) {
-                const request = requestsSnap.docs[0];
-                requestStatus = request.data().status;
-                hasActiveRequest = true;
-              }
-            } catch (error) {
-              // Silent permission fallback
-            }
-
-            return {
-              ...listing,
-              requestStatus,
-              hasActiveRequest,
-            };
-          })
-        );
-
-        if (mounted) {
-          setListings(enhancedListings);
-        }
-      } catch (error) {
-        console.warn("Listings fetch failed:", error);
-        if (mounted) {
-          setListings([]);
-        }
-      } finally {
-        if (mounted) {
-          setDataLoading(prev => ({ ...prev, listings: false }));
-        }
-      }
-    };
-
-    fetchListings();
-
-    return () => {
-      mounted = false;
-    };
-  }, [currentUser?.uid]);
-
+  
   // ======================================================================
   // MEMOIZED DERIVED DATA WITH FILTERING
   // ======================================================================
@@ -460,9 +426,10 @@ export default function MyActivity() {
 
   // Filter listings using localStorage
   const filteredListings = useMemo(() => {
-    const hidden = getHiddenListings();
-    return listings.filter((l) => !hidden[l.id]);
-  }, [listings]);
+  const hidden = getHiddenListings();
+  return (listings || []).filter((l) => !hidden[l.id]);
+}, [listings]);
+
 
   const visList = useMemo(() => filterVisible(filteredListings), [filteredListings]);
 
@@ -608,11 +575,9 @@ export default function MyActivity() {
     }
     else if (isListing) {
       // UI-ONLY soft delete for listings
-      hideListing(item.id);
-      // Also remove from state for immediate UI update
-      setListings(prev => prev.filter(l => l.id !== item.id));
-      toast.success("Listing removed from your activity");
-    }
+     hideListing(item.id);
+  toast.success("Listing removed from your activity");
+}
     else {
       // Fallback - just close modal
       console.warn("Unknown item type in confirmDelete:", item);
@@ -632,62 +597,81 @@ export default function MyActivity() {
   // ======================================================================
 
   // BUYER confirms delivery (FREE or PREMIUM) - PHASE-2 COMPLIANT
-  const handleBuyerConfirmDelivery = useCallback(
-    async (item) => {
-      if (!item?.id || loading.premium) return;
+ const handleBuyerConfirmDelivery = useCallback(
+  async (item) => {
+    if (!item || loading.premium) return;
 
-      try {
-        setLoading((s) => ({ ...s, premium: item.id }));
+    // 🔒 Phase-2 authoritative delivery ID resolution
+    const deliveryId =
+      item.deliveryData?.id ||
+      item.deliveryId ||
+      item.id;
 
-        // ✅ FIX: Use correct backend function name and payload
-        const fn = httpsCallable(functions, "buyerConfirmDelivery");
-        
-        // ✅ FIX: Send deliveryId
-        await fn({
-          deliveryId: item.deliveryData?.id || item.id,
-        });
+    if (!deliveryId) {
+      toast.error("Delivery record not found.");
+      return;
+    }
 
-        toast.success("Delivery confirmed.");
-      } catch (err) {
-        console.error(err);
-        toast.error(err?.message || "Failed to confirm delivery.");
-      } finally {
-        setLoading((s) => ({ ...s, premium: null }));
-      }
-    },
-    [loading.premium]
-  );
+    try {
+      setLoading((s) => ({ ...s, premium: deliveryId }));
+
+      // 🔑 PHASE-2 CANONICAL FUNCTION
+      const fn = httpsCallable(functions, "recipientConfirmDelivery");
+
+      await fn({
+        requestId: deliveryId,
+        accepted: true,
+      });
+
+      toast.success("✅ Delivery confirmed.");
+    } catch (err) {
+      console.error("BuyerConfirmDelivery error:", err);
+      toast.error(
+        err?.message || "Failed to confirm delivery."
+      );
+    } finally {
+      setLoading((s) => ({ ...s, premium: null }));
+    }
+  },
+  [loading.premium]
+);
+
 
   // ADDRESS SUBMISSION (BUYER → BACKEND-AUTHORITATIVE)
-  const submitAddress = useCallback(
-    async ({ item, address, phone, instructions }) => {
-      if (!item?.id || loading.address) return;
+ const submitAddress = useCallback(
+  async ({
+    requestId,
+    deliveryAddress,
+    deliveryPhone,
+    deliveryInstructions,
+  }) => {
+    if (!requestId || loading.address) return;
 
-      try {
-        setLoading((s) => ({ ...s, address: item.id }));
+    try {
+      setLoading((s) => ({ ...s, address: requestId }));
 
-        const fn = httpsCallable(functions, "submitDeliveryDetails");
+      const fn = httpsCallable(functions, "submitDeliveryDetails");
 
-        await fn({
-          requestId: item.id,
-          deliveryAddress: address,
-          deliveryPhone: phone,
-          deliveryInstructions: instructions || "",
-        });
+      await fn({
+        requestId,
+        deliveryAddress,
+        deliveryPhone,
+        deliveryInstructions: deliveryInstructions || "",
+      });
 
-        toast.success("🎉 Delivery details confirmed!");
-      } catch (err) {
-        console.error(err);
-        toast.error(
-          err?.message || "Failed to save delivery details."
-        );
-      } finally {
-        setAddressModal({ open: false, item: null });
-        setLoading((s) => ({ ...s, address: null }));
-      }
-    },
-    [loading.address]
-  );
+      toast.success("🎉 Delivery details confirmed!");
+    } catch (err) {
+      console.error(err);
+      toast.error(
+        err?.message || "Failed to save delivery details."
+      );
+    } finally {
+      setAddressModal({ open: false, item: null });
+      setLoading((s) => ({ ...s, address: null }));
+    }
+  },
+  [loading.address]
+);
 
   // Enhanced view handler for listings
   const handleViewListing = useCallback((listing) => {
@@ -716,7 +700,8 @@ export default function MyActivity() {
   const handleListingSchedulePickup = useCallback((listing) => {
     if (!listing) return;
 
-    const isFreeItem = listing.donation?.type !== "premium";
+    const isFreeItem = listing.type !== "premium";
+
 
     if (isFreeItem) {
       if (!listing.hasActiveRequest) {
@@ -881,34 +866,39 @@ export default function MyActivity() {
         );
 
       case "listings":
-        if (dataLoading.listings) {
-          return (
-            <div className="flex flex-col items-center justify-center py-16">
-              <Loader2 className="animate-spin text-gray-400 mb-4" size={28} />
-              <p className="text-sm text-gray-500">Loading listings...</p>
-            </div>
-          );
-        }
-        if (listingsWithRequestInfo.length === 0) {
-          return showEmptyState("No listings yet");
-        }
-        return (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {listingsWithRequestInfo.map((l) => (
-              <ListingCard
-                key={l.id}
-                item={l}
-                currentUser={currentUser}
-                onView={() => handleViewListing(l)}
-                onDelete={() => handleDelete(l)}
-                onRelist={() => setRelistModal({ open: true, item: l })}
-                onSchedulePickup={() => handleListingSchedulePickup(l)}
-                isLoading={loadingDeliveryDetails[l.id]}
-                showDeliveryInfo={true}
-              />
-            ))}
-          </div>
-        );
+  // Listings now come from useMyListings hook
+  // No separate loading flag — empty array means either loading or no data
+
+  if (!Array.isArray(listingsWithRequestInfo)) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16">
+        <Loader2 className="animate-spin text-gray-400 mb-4" size={28} />
+        <p className="text-sm text-gray-500">Loading listings...</p>
+      </div>
+    );
+  }
+
+  if (listingsWithRequestInfo.length === 0) {
+    return showEmptyState("No listings yet");
+  }
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {listingsWithRequestInfo.map((l) => (
+        <ListingCard
+          key={l.id}
+          item={l}
+          currentUser={currentUser}
+          onView={() => handleViewListing(l)}
+          onDelete={() => handleDelete(l)}
+          onRelist={() => setRelistModal({ open: true, item: l })}
+          onSchedulePickup={() => handleListingSchedulePickup(l)}
+          isLoading={loadingDeliveryDetails[l.id]}
+          showDeliveryInfo={true}
+        />
+      ))}
+    </div>
+  );
 
       default:
         return null;
@@ -948,17 +938,32 @@ export default function MyActivity() {
           />
         );
 
-      case "listing":
-        return (
-          <DetailDrawerPremium
-            open={drawer.open}
-            item={drawerItem}
-            currentUser={currentUser}
-            onClose={() => setDrawer({ open: false, type: null, itemId: null })}
-            onDelete={() => handleDelete(drawerItem)}
-            showDeliveryDetails={!!drawerItem?.deliveryDetails}
-          />
-        );
+        case "listing":
+  if (drawerItem.type === "premium") {
+    return (
+      <DetailDrawerPremium
+        open={drawer.open}
+        item={drawerItem}
+        currentUser={currentUser}
+        onClose={() => setDrawer({ open: false, type: null, itemId: null })}
+        onDelete={() => handleDelete(drawerItem)}
+        showDeliveryDetails
+      />
+    );
+  }
+
+  return (
+    <DetailDrawerFree
+      open={drawer.open}
+      item={drawerItem}
+      currentUser={currentUser}
+      onClose={() => setDrawer({ open: false, type: null, itemId: null })}
+      onDelete={() => handleDelete(drawerItem)}
+    />
+  );
+
+
+     
 
       default:
         return null;

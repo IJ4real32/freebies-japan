@@ -1,6 +1,5 @@
 // ============================================================================
-// FILE: RequestCard.jsx — PHASE-2 FINAL (COMPATIBLE)
-// Fixed for MyActivity data structure
+// FILE: RequestCard.jsx — PHASE-2 FINAL (LOCKED & AUTHORITATIVE)
 // ============================================================================
 
 import React from "react";
@@ -15,51 +14,33 @@ import {
 import StatusBadge from "./StatusBadge";
 
 /* ------------------------------------------------------------
-   CONSTANTS
+   CONSTANTS — PHASE-2 CANONICAL
 ------------------------------------------------------------ */
 
-// Normalized delivery states where buyer actions are locked
+// Delivery states where buyer actions are LOCKED
 const DELIVERY_LOCK = [
+  "recipientaccepted",
   "accepted",
   "addresssubmitted",
-  "pickupscheduled",
   "pickupconfirmed",
   "intransit",
-  "outfordelivery",
-  "delivered",
-  "buyerconfirmed",
   "completed",
+  "forceclosed",
 ];
 
 // Allowed delete states (UI-only cleanup)
-const ALLOW_DELETE = [
-  "rejected",
-  "cancelled",
-  "expired",
-];
+const ALLOW_DELETE = ["rejected", "cancelled", "expired"];
 
 /* ------------------------------------------------------------
    IMAGE RESOLVER (SAFE)
 ------------------------------------------------------------ */
 const resolveImage = (item) => {
-  // Handle both item.donation and direct donation data
   const donation = item.donation || item;
-  
-  if (donation.images?.length) {
-    return donation.images[0];
-  }
 
-  if (donation.imageUrls?.length) {
-    return donation.imageUrls[0];
-  }
-
-  if (donation.image) {
-    return donation.image;
-  }
-
-  if (item.itemImages?.length) {
-    return item.itemImages[0];
-  }
+  if (donation.images?.length) return donation.images[0];
+  if (donation.imageUrls?.length) return donation.imageUrls[0];
+  if (donation.image) return donation.image;
+  if (item.itemImages?.length) return item.itemImages[0];
 
   return "/images/default-item.jpg";
 };
@@ -69,18 +50,22 @@ const resolveImage = (item) => {
 ------------------------------------------------------------ */
 const resolveTitle = (item) => {
   const donation = item.donation || item;
-  return donation.title || 
-         donation.itemTitle || 
-         item.itemTitle || 
-         "Untitled Item";
+  return (
+    donation.title ||
+    donation.itemTitle ||
+    item.itemTitle ||
+    "Untitled Item"
+  );
 };
 
 const resolveDescription = (item) => {
   const donation = item.donation || item;
-  return donation.description || 
-         donation.itemDescription || 
-         item.itemDescription || 
-         "No description available.";
+  return (
+    donation.description ||
+    donation.itemDescription ||
+    item.itemDescription ||
+    "No description available."
+  );
 };
 
 /* ------------------------------------------------------------
@@ -96,23 +81,19 @@ export default function RequestCard({
 }) {
   if (!item) return null;
 
-  // Handle both item.donation and direct donation data
   const donation = item.donation || item;
-
-  // 🔑 PHASE-2 DELIVERY SOURCE OF TRUTH
   const delivery = item.deliveryData || {};
 
-  // HARD GUARD — premium must never appear here
+  // Premium items NEVER appear here
   if (donation.type === "premium" || item.isPremium) return null;
 
   const userId = currentUser?.uid;
   const isBuyer = userId === item.userId;
 
   /* ------------------------------------------------------------
-     DELIVERY LOCK (STATUS + FIELD-BASED)
+     DELIVERY LOCK — BACKEND AUTHORITATIVE
   ------------------------------------------------------------ */
   const normalizedDeliveryStatus = (
-    delivery.status ||
     delivery.deliveryStatus ||
     item.deliveryStatus ||
     ""
@@ -122,23 +103,21 @@ export default function RequestCard({
 
   const isLocked =
     DELIVERY_LOCK.includes(normalizedDeliveryStatus) ||
-    item.deliveryStatus === "pending_seller_confirmation" ||
     !!delivery.deliveryAddress;
 
   /* ------------------------------------------------------------
      PERMISSIONS
   ------------------------------------------------------------ */
 
-  // Delete permission (safe + conservative)
   const canDelete =
-    ALLOW_DELETE.includes(item.status) && !isLocked;
+    ALLOW_DELETE.includes(item.status) &&
+    !isLocked &&
+    !delivery.deliveryStatus;
 
-  // Buyer acceptance zone (delivery intent)
   const canAccept =
     item.status === "awarded" &&
     isBuyer &&
-    !isLocked &&
-    item.deliveryStatus !== "pending_seller_confirmation";
+    !isLocked;
 
   const img = resolveImage(item);
   const title = resolveTitle(item);
@@ -146,16 +125,14 @@ export default function RequestCard({
 
   const safeClick = (e) => {
     if (e.target.closest(".action-btn")) return;
-    onView();
+    onView?.();
   };
 
   const formatDate = () => {
     try {
       const date = item.updatedAt || donation.updatedAt;
-      if (date?.toDate)
-        return date.toDate().toLocaleDateString();
-      if (date)
-        return new Date(date).toLocaleDateString();
+      if (date?.toDate) return date.toDate().toLocaleDateString();
+      if (date) return new Date(date).toLocaleDateString();
     } catch {}
     return "—";
   };
@@ -191,7 +168,7 @@ export default function RequestCard({
 
       {/* ACTION BUTTONS */}
       <div className="absolute top-3 right-3 z-30 flex gap-2">
-        {/* ACCEPT AWARD → DELIVERY DETAILS */}
+        {/* ACCEPT AWARD */}
         {canAccept && (
           <>
             <button
@@ -205,11 +182,10 @@ export default function RequestCard({
               <Check size={14} />
             </button>
 
-            {/* REMOVE FROM MY ACTIVITY (UI-ONLY) */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onDelete();
+                onDelete?.();
               }}
               className="action-btn bg-gray-500 hover:bg-gray-600 text-white p-2 rounded-full shadow transition hover:scale-110"
               title="Remove from my activity"
@@ -219,12 +195,12 @@ export default function RequestCard({
           </>
         )}
 
-        {/* DELETE (REJECTED / EXPIRED ONLY) */}
+        {/* DELETE */}
         {canDelete && (
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onDelete();
+              onDelete?.();
             }}
             disabled={deleting}
             className="action-btn bg-red-500 hover:bg-red-600 text-white p-2 rounded-full shadow transition hover:scale-110 disabled:opacity-40"
@@ -262,24 +238,11 @@ export default function RequestCard({
           {description}
         </p>
 
-        {/* ITEM INFO */}
-        {donation.price && (
-          <p className="text-xs text-gray-700 mb-1">
-            Value: ¥{(donation.price || 0).toLocaleString()}
-          </p>
-        )}
-
-        {donation.condition && (
-          <p className="text-xs text-gray-500 mb-2">
-            Condition: {donation.condition}
-          </p>
-        )}
-
         <div className="flex items-center justify-between">
           <StatusBadge
             status={item.status}
             deliveryStatus={
-              delivery.status || delivery.deliveryStatus || item.deliveryStatus
+              delivery.deliveryStatus || item.deliveryStatus
             }
           />
           <span className="text-xs text-gray-500">

@@ -1,4 +1,6 @@
-// ✅ FILE: src/components/UI/Navbar.jsx (Optimized + Scaled Logo + Scroll Hide)
+// ✅ FILE: src/components/UI/Navbar.jsx
+// FINAL MOBILE-SAFE NAVBAR (NO REGRESSIONS)
+
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
@@ -41,9 +43,9 @@ export default function Navbar() {
    * Scroll: hide on scroll-down, show on scroll-up
    ------------------------------------------------------------ */
   useEffect(() => {
-    let lastY = window.scrollY;
+let lastY = window.scrollY;
     let ticking = false;
-
+    
     const handleScroll = () => {
       if (!ticking) {
         window.requestAnimationFrame(() => {
@@ -71,7 +73,7 @@ export default function Navbar() {
   }, [location.pathname]);
 
   /* Hide for Admin pages */
-  if (isAdminRoute || loadingAuth || !currentUser) return null;
+    if (isAdminRoute || loadingAuth || !currentUser) return null;
 
   /* Logout handler */
   const handleLogout = async () => {
@@ -95,9 +97,9 @@ export default function Navbar() {
 
           {/* 🔥 Scaled Logo (does NOT change navbar height) */}
           <Link to="/items" className="flex items-center">
-            <img
-              src="/LogoX.png"
-              alt="Freebies Japan"
+                  <img
+                    src="/LogoX.png"
+                    alt="Freebies Japan"
                className={`h-10 sm:h-12 transform transition-transform duration-300 ${
     logoSmall ? "scale-90" : "scale-[3]"
               }`}
@@ -111,14 +113,14 @@ export default function Navbar() {
             <Link
               to="/items"
               className={currentPath === "/items" ? "text-blue-200 font-semibold" : "hover:text-blue-200"}
-            >
+                          >
               {t("items")}
             </Link>
 
             <Link
               to="/myactivity"
               className={currentPath === "/myactivity" ? "text-blue-200 font-semibold" : "hover:text-blue-200"}
-            >
+                          >
               {t("My Activity")}
             </Link>
 
@@ -138,9 +140,9 @@ export default function Navbar() {
                         setLangMenuOpen(false);
                       }}
                       className={`w-full px-3 py-2 flex items-center gap-2 hover:bg-blue-50 ${
-                        language === code ? "bg-blue-50 font-semibold" : ""
+language === code ? "bg-blue-50 font-semibold" : ""
                       }`}
-                    >
+                                          >
                       <span>{flag}</span> {name}
                     </button>
                   ))}
@@ -246,29 +248,29 @@ export default function Navbar() {
 
       {/* BOTTOM NAV (MOBILE) */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-blue-900/95 border-t border-blue-800/40 text-white flex justify-around items-center py-2 z-40">
-        <Link
-          to="/items"
+          <Link
+            to="/items"
           className={`flex flex-col items-center text-xs ${currentPath === "/items" && "text-blue-300"}`}
-        >
-          <Home size={20} />
+                      >
+              <Home size={20} />
           <span>{t("Items")}</span>
-        </Link>
+          </Link>
 
-        <Link
-          to="/myactivity"
+          <Link
+            to="/myactivity"
           className={`flex flex-col items-center text-xs ${currentPath === "/myactivity" && "text-blue-300"}`}
-        >
-          <Package size={20} />
+                      >
+              <Package size={20} />
           <span>{t("Activity")}</span>
-        </Link>
+          </Link>
 
-        <Link
-          to="/profile"
+          <Link
+            to="/profile"
           className={`flex flex-col items-center text-xs ${currentPath === "/profile" && "text-blue-300"}`}
-        >
-          <User size={20} />
+                      >
+              <User size={20} />
           <span>{t("Profile")}</span>
-        </Link>
+          </Link>
       </div>
 
       <style>{`

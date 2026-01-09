@@ -1,5 +1,5 @@
 // =======================================================
-// ITEMS PAGE — CLEANED UP WITH PROPER COUNTERS
+// ITEMS PAGE — MOBILE POLISH IMPLEMENTATION
 // =======================================================
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
@@ -739,16 +739,17 @@ const handlePremiumAction = useCallback(
     <div className="min-h-screen bg-gray-50">
       <SubscriptionBanner />
       
-      {/* Header */}
-      <div className="bg-white shadow-sm py-4 px-4 border-b border-gray-200 sticky top-0 z-30">
+      {/* Header - 📱 MOBILE POLISH: Phase 1, Point 4️⃣ */}
+      <div className="bg-white shadow-sm py-3 px-4 border-b border-gray-200 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto">
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Browse Items</h1>
-              <p className="text-gray-600 mt-1">Find free and premium items</p>
+              {/* 📱 MOBILE POLISH: Reduce title size */}
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Browse Items</h1>
+              <p className="text-gray-600 text-sm sm:text-base mt-1">Find free and premium items</p>
             </div>
             {currentUser && !isSubscribed && trialCreditsLeft > 0 && (
-              <div className="text-sm">
+              <div className="text-sm hidden sm:block">
                 <span className="text-amber-600 font-medium">
                   {trialCreditsLeft} free request{trialCreditsLeft !== 1 ? 's' : ''} left
                 </span>
@@ -756,7 +757,7 @@ const handlePremiumAction = useCallback(
             )}
           </div>
           
-          <div className="mt-4 relative max-w-md">
+          <div className="mt-3 sm:mt-4 relative max-w-md">
             <div className="relative">
               <Search className="absolute left-3 top-3.5 h-5 w-5 text-gray-400" />
               <input
@@ -764,7 +765,7 @@ const handlePremiumAction = useCallback(
                 placeholder="Search items, categories..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white"
+                className="w-full pl-10 pr-4 py-2.5 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white text-sm sm:text-base"
               />
             </div>
           </div>
@@ -794,14 +795,20 @@ const handlePremiumAction = useCallback(
           </div>
         ) : (
           <>
+            {/* 📱 MOBILE POLISH: Phase 3, Point 8️⃣ - Hide PremiumTimeline on mobile */}
+            <div className="hidden sm:block mb-6">
+              
+  
+            </div>
+
             {/* Stats - UPDATED: Show only available free items and available premium items */}
             <div className="mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                <div className="text-3xl font-bold text-gray-900">{totalVisibleItems}</div>
+              <div className="bg-white p-4 sm:p-6 rounded-lg shadow-sm border border-gray-200">
+                <div className="text-2xl sm:text-3xl font-bold text-gray-900">{totalVisibleItems}</div>
                 <div className="text-sm text-gray-600 mt-1">Total Visible Items</div>
               </div>
-              <div className="bg-emerald-50 p-6 rounded-lg shadow-sm border border-emerald-200">
-                <div className="text-3xl font-bold text-emerald-700">
+              <div className="bg-emerald-50 p-4 sm:p-6 rounded-lg shadow-sm border border-emerald-200">
+                <div className="text-2xl sm:text-3xl font-bold text-emerald-700">
                   {freeItemsCount}
                 </div>
                 <div className="text-sm text-emerald-600 mt-1">Available Free Items</div>
@@ -809,8 +816,8 @@ const handlePremiumAction = useCallback(
                   (Requestable & Not Closed)
                 </div>
               </div>
-              <div className="bg-indigo-50 p-6 rounded-lg shadow-sm border border-indigo-200">
-                <div className="text-3xl font-bold text-indigo-700">
+              <div className="bg-indigo-50 p-4 sm:p-6 rounded-lg shadow-sm border border-indigo-200">
+                <div className="text-2xl sm:text-3xl font-bold text-indigo-700">
                   {premiumItemsCount}
                 </div>
                 <div className="text-sm text-indigo-600 mt-1">Available Premium Items</div>
@@ -823,7 +830,7 @@ const handlePremiumAction = useCallback(
             {/* Search results info */}
             {search && (
               <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <p className="text-blue-800">
+                <p className="text-blue-800 text-sm sm:text-base">
                   Showing {displayedItems.length} result{displayedItems.length !== 1 ? 's' : ''} for "{search}"
                   {displayedItems.length === 0 && " - try different keywords"}
                 </p>
@@ -833,11 +840,11 @@ const handlePremiumAction = useCallback(
             {/* Items grid */}
             <div className="mb-6">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-semibold text-gray-900">
+                <h2 className="text-lg sm:text-xl font-semibold text-gray-900">
                   Available Items {search && `(${displayedItems.length})`}
                 </h2>
                 {!search && (
-                  <div className="text-sm text-gray-500">
+                  <div className="text-sm text-gray-500 hidden sm:block">
                     Sorted by newest first
                   </div>
                 )}
@@ -855,7 +862,7 @@ const handlePremiumAction = useCallback(
                   </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
                   {displayedItems.map((item) => {
                     const isPremium = item.type === "premium";
                     const premiumCfg = getPremiumStatusConfigMemo(item);
@@ -879,8 +886,9 @@ const handlePremiumAction = useCallback(
                           setImageIndex(0);
                         }}
                       >
+                        {/* 📱 MOBILE POLISH: Phase 1, Point 1️⃣ - Card Height Fix */}
                         {/* Image with badges */}
-                        <div className="relative h-56 bg-gray-100">
+                        <div className="relative aspect-[4/3] bg-gray-100">
                           <img
                             src={item.images?.[0] || "/images/default-item.jpg"}
                             alt={item.title}
@@ -890,7 +898,8 @@ const handlePremiumAction = useCallback(
                             }}
                           />
                           
-                          {/* Badges */}
+                          {/* 📱 MOBILE POLISH: Phase 1, Point 3️⃣ - Badge Cap */}
+                          {/* Badges - Max 2 on mobile */}
                           <div className="absolute top-2 right-2 flex flex-col gap-1">
                             {sponsored && (
                               <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white text-xs px-2 py-1 rounded-full font-semibold flex items-center gap-1">
@@ -904,16 +913,17 @@ const handlePremiumAction = useCallback(
                               </div>
                             )}
                             
-                            {isPremium && buyer && (
+                            {isPremium && buyer && !owner && !sponsored && (
                               <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs px-2 py-1 rounded-full font-semibold flex items-center gap-1">
                                 <User size={10} /> Your Purchase
                               </div>
                             )}
                           </div>
                           
+                          {/* 📱 MOBILE POLISH: Phase 1, Point 3️⃣ - Hide premium ribbon on mobile */}
                           {/* Premium ribbon */}
                           {isPremium && item.premiumStatus !== "available" && (
-                            <div className={`absolute top-2 left-0 right-0 bg-gradient-to-r ${premiumCfg.ribbonColor} text-white text-xs py-1 text-center font-semibold`}>
+                            <div className={`hidden sm:block absolute top-2 left-0 right-0 bg-gradient-to-r ${premiumCfg.ribbonColor} text-white text-xs py-1 text-center font-semibold`}>
                               {premiumCfg.label}
                             </div>
                           )}
@@ -924,7 +934,7 @@ const handlePremiumAction = useCallback(
                               ? "bg-gradient-to-r from-indigo-600/90 to-purple-600/90" 
                               : "bg-gradient-to-r from-emerald-600/90 to-green-600/90"
                           }`}>
-                            <div className="text-white font-bold text-lg">
+                            <div className="text-white font-bold text-base sm:text-lg">
                               {isPremium 
                                 ? `¥${item.price?.toLocaleString() || "0"}` 
                                 : "FREE"}
@@ -933,18 +943,19 @@ const handlePremiumAction = useCallback(
                         </div>
                         
                         {/* Content */}
-                        <div className="p-5">
-                          <h3 className="font-bold text-gray-900 text-lg mb-2 line-clamp-2 leading-tight">
+                        <div className="p-4 sm:p-5">
+                          <h3 className="font-bold text-gray-900 text-base sm:text-lg mb-2 line-clamp-2 leading-tight">
                             {item.title}
                           </h3>
                           
-                          <p className="text-gray-600 text-sm mb-3">
-                            {item.category || "Uncategorized"}
+                          {/* 📱 MOBILE POLISH: Phase 1, Point 2️⃣ - Card Content Cleanup */}
+                          <p className="text-gray-500 text-xs mb-2">
+                            {item.category || "General"}
                           </p>
                           
                           {/* Free item timer */}
                           {!isPremium && (
-                            <p className={`text-xs font-medium mb-3 ${closed ? "text-gray-400" : "text-emerald-600"}`}>
+                            <p className={`text-xs font-medium mb-2 ${closed ? "text-gray-400" : "text-emerald-600"}`}>
                               {closed ? "⏰ Request Closed" : `⏱ ${formatTimeRemaining(item.requestWindowEnd)}`}
                             </p>
                           )}
@@ -956,21 +967,14 @@ const handlePremiumAction = useCallback(
                             </span>
                           )}
                           
-                          {/* Availability indicator */}
-                          <div className="mt-2">
-                            {!isPremium && (
-                              <span className={`text-xs ${requestable ? "text-emerald-600" : "text-gray-500"}`}>
-                                {requestable ? "✅ Available for Request" : "❌ Not Available"}
-                              </span>
-                            )}
-                            {isPremium && (
-                              <span className={`text-xs ${premiumAvailable ? "text-indigo-600" : "text-gray-500"}`}>
-                                {premiumAvailable ? "✅ Available for Purchase" : "❌ Not Available"}
-                              </span>
-                            )}
+                          {/* 📱 MOBILE POLISH: Phase 1, Point 2️⃣ - Simplified footer */}
+                          {/* Mobile-only footer */}
+                          <div className="block sm:hidden pt-2 text-right text-sm font-medium text-indigo-600">
+                            View →
                           </div>
                           
-                          <div className="flex items-center justify-between pt-3 border-t border-gray-100 mt-3">
+                          {/* Desktop footer */}
+                          <div className="hidden sm:flex items-center justify-between pt-3 border-t border-gray-100 mt-3">
                             <div className="text-xs text-gray-500">
                               {item.size && `📦 ${item.size}`}
                             </div>
@@ -1002,23 +1006,23 @@ const handlePremiumAction = useCallback(
         )}
       </main>
 
-      {/* Modal */}
+      {/* 📱 MOBILE POLISH: Phase 2, Point 5️⃣ - Native Modal UX */}
       {viewItem && (
         <div 
-          className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50"
+          className="fixed inset-0 bg-black/70 flex items-end sm:items-center justify-center z-50"
           onClick={() => setViewItem(null)}
         >
           <div 
-            className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+            className="bg-white rounded-t-2xl sm:rounded-xl max-w-2xl w-full max-h-[90vh] sm:max-h-[80vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-6">
+            <div className="p-4 sm:p-6">
               {/* Modal header */}
-              <div className="flex justify-between items-start mb-6">
+              <div className="flex justify-between items-start mb-4 sm:mb-6">
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-900">{viewItem.title}</h2>
-                  <div className="flex items-center gap-2 mt-2">
-                    <div className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${
+                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900">{viewItem.title}</h2>
+                  <div className="flex items-center gap-2 mt-1 sm:mt-2">
+                    <div className={`inline-block px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-bold ${
                       viewItem.type === "premium" 
                         ? "bg-indigo-100 text-indigo-800" 
                         : "bg-emerald-100 text-emerald-800"
@@ -1036,13 +1040,14 @@ const handlePremiumAction = useCallback(
                   onClick={() => setViewItem(null)}
                   className="text-gray-400 hover:text-gray-600"
                 >
-                  <X size={24} />
+                  <X size={20} className="sm:w-6 sm:h-6" />
                 </button>
               </div>
               
+              {/* 📱 MOBILE POLISH: Phase 2, Point 6️⃣ - Image Swipe Polish */}
               {/* Image carousel */}
               <div 
-                className="relative w-full h-64 bg-gray-100 rounded-lg overflow-hidden mb-6 flex items-center justify-center"
+                className="relative w-full h-48 sm:h-64 bg-gray-100 rounded-lg overflow-hidden mb-4 sm:mb-6 flex items-center justify-center"
                 onTouchStart={(e) => (touchStartX.current = e.touches[0].clientX)}
                 onTouchEnd={(e) => {
                   touchEndX.current = e.changedTouches[0].clientX;
@@ -1061,7 +1066,8 @@ const handlePremiumAction = useCallback(
                     <img
                       src={viewItem.images[imageIndex]}
                       alt={viewItem.title}
-                      className="object-contain w-full h-full"
+                      className="object-contain w-full h-full select-none"
+                      draggable="false"
                     />
                     {viewItem.images.length > 1 && (
                       <>
@@ -1095,13 +1101,13 @@ const handlePremiumAction = useCallback(
               </div>
               
               {/* Description */}
-              <p className="text-gray-700 mb-6">
+              <p className="text-gray-700 text-sm sm:text-base mb-4 sm:mb-6">
                 {viewItem.description || "No description provided."}
               </p>
               
-              {/* ✅ DELIVERABLE D: Premium Timeline */}
+              {/* ✅ DELIVERABLE D: Premium Timeline - Hidden on mobile */}
               {viewItem.type === "premium" && (
-                <div className="mb-6">
+                <div className="hidden sm:block mb-6">
                   <PremiumTimeline 
                     currentStatus={viewItem.premiumStatus} 
                     isBuyer={isPremiumBuyerMemo(viewItem)}
@@ -1110,11 +1116,11 @@ const handlePremiumAction = useCallback(
               )}
               
               {/* Details grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 mb-4 sm:mb-6">
+                <div className="space-y-3 sm:space-y-4">
                   <div>
                     <div className="text-sm text-gray-500 font-medium">Price</div>
-                    <div className={`text-2xl font-bold ${
+                    <div className={`text-xl sm:text-2xl font-bold ${
                       viewItem.type === "premium" 
                         ? "text-indigo-600" 
                         : "text-emerald-600"
@@ -1142,7 +1148,7 @@ const handlePremiumAction = useCallback(
                 
                 {/* ✅ DELIVERABLE E: Delivery estimate */}
                 {viewItem.estimatedDelivery && (
-                  <div className="bg-indigo-50 text-indigo-700 p-4 rounded-lg">
+                  <div className="bg-indigo-50 text-indigo-700 p-3 sm:p-4 rounded-lg">
                     <div className="text-sm font-medium mb-1">Estimated Delivery</div>
                     <div className="font-semibold">
                       ¥{viewItem.estimatedDelivery.min?.toLocaleString() || "0"}–¥
@@ -1153,7 +1159,7 @@ const handlePremiumAction = useCallback(
               </div>
               
               {/* Status badges */}
-              <div className="flex flex-wrap gap-2 mb-6">
+              <div className="flex flex-wrap gap-2 mb-4 sm:mb-6">
                 {isSponsoredItemMemo(viewItem) && (
                   <span className="bg-gradient-to-r from-purple-600 to-blue-600 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
                     <Crown size={12} />
@@ -1175,6 +1181,7 @@ const handlePremiumAction = useCallback(
                 )}
               </div>
               
+              {/* 📱 MOBILE POLISH: Phase 3, Point 7️⃣ - Obvious Free Item Button */}
               {/* Action buttons */}
               {viewItem.type === "premium" ? (
                 <>
@@ -1197,7 +1204,7 @@ const handlePremiumAction = useCallback(
                         refreshItemData();
                       }}
                       depositButton={
-                        isPremiumAvailableMemo(viewItem) && (
+                        isPremiumAvailableMemo(viewItem) ? (
                           <ItemDepositButton
                             itemId={viewItem.id}
                             title={viewItem.title}
@@ -1207,7 +1214,7 @@ const handlePremiumAction = useCallback(
                               refreshItemData();
                             }}
                           />
-                        )
+                        ) : null
                       }
                     />
                   )}
@@ -1222,7 +1229,7 @@ const handlePremiumAction = useCallback(
                     isFreeItemClosed(viewItem) ||
                     isCurrentUserOwnerMemo(viewItem)
                   }
-                  className={`w-full py-3 px-4 rounded-lg font-medium transition-colors ${
+                  className={`w-full h-12 rounded-xl font-medium transition-colors text-sm sm:text-base ${
                     submitting
                       ? "bg-gray-300 text-gray-600 cursor-wait"
                       : !isFreeRequestable(viewItem) 

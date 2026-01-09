@@ -1,6 +1,6 @@
 // ============================================================================
-// FILE: ListingCard.jsx — PHASE-2 FINAL (COMPATIBLE)
-// Fixed for MyActivity data structure
+// FILE: ListingCard.jsx — PHASE-2 FINAL (ROLE-SAFE)
+// Seller-only delivery logic for MyActivity → Listings
 // ============================================================================
 
 import React from "react";
@@ -9,11 +9,11 @@ import {
   Trash,
   Loader2,
   RefreshCw,
-  Truck,
   Calendar,
   Check,
 } from "lucide-react";
 import StatusBadge from "./StatusBadge";
+import SellerPickupScheduler from "../Logistics/SellerPickupScheduler";
 
 export default function ListingCard({
   item,
@@ -21,102 +21,52 @@ export default function ListingCard({
   onView,
   onDelete,
   onRelist,
-  onSchedulePickup,
   isLoading,
-  showDeliveryInfo = false,
 }) {
-  if (!item) return null;
+  if (!item || !currentUser) return null;
 
   /* ------------------------------------------------------------
-     CORE DATA - Handle MyActivity data structure
+     SOURCE DATA (MyActivity structure)
   ------------------------------------------------------------ */
-  // In MyActivity, listings come from donations collection directly
-  // So 'item' IS the donation, not wrapped in donation property
-  const donation = item || {};
-  
-  // For backward compatibility, check if item has donation property
-  const listingData = item.donation || item;
+  const listing = item.donation || item;
+  const delivery = item.deliveryData || null;
 
-  // 🔑 Phase-2 delivery source of truth
-  const delivery = item.deliveryData || {};
+  const isSeller = listing.donorId === currentUser.uid;
+  if (!isSeller) return null; // 🔒 HARD ROLE LOCK
 
-  const deliveryStatus =
-    delivery.status || delivery.deliveryStatus || null;
-
-  const isSeller = currentUser?.uid === listingData.donorId;
-  const isFreeItem = listingData.type !== "premium";
+  const isFreeItem = listing.type !== "premium";
 
   /* ------------------------------------------------------------
-     REQUEST / PICKUP GATING (FREE ITEMS)
+     IMAGE
   ------------------------------------------------------------ */
-  const hasActiveRequest = item.hasActiveRequest || false;
-
-  const hasScheduledPickup =
-    delivery.pickupStatus &&
-    ["proposed", "confirmed", "rescheduled"].includes(
-      delivery.pickupStatus
-    );
-
-  /* ------------------------------------------------------------
-     IMAGE - Handle multiple image sources
-  ------------------------------------------------------------ */
-  const getImage = () => {
-    if (listingData.images?.length) {
-      return listingData.images[0];
-    }
-    if (listingData.imageUrls?.length) {
-      return listingData.imageUrls[0];
-    }
-    if (listingData.image) {
-      return listingData.image;
-    }
-    return "/images/default-item.jpg";
-  };
-
-  const image = getImage();
-
-  /* ------------------------------------------------------------
-     TITLE & DESCRIPTION
-  ------------------------------------------------------------ */
-  const getTitle = () => {
-    return listingData.title || 
-           listingData.itemTitle || 
-           "Untitled Listing";
-  };
-
-  const getDescription = () => {
-    return listingData.description || 
-           listingData.itemDescription || 
-           "No description provided.";
-  };
+  const image =
+    listing.images?.[0] ||
+    listing.imageUrls?.[0] ||
+    listing.image ||
+    "/images/default-item.jpg";
 
   /* ------------------------------------------------------------
      STATUS
   ------------------------------------------------------------ */
-  const status = listingData.status || "active";
+  const status = listing.status || "active";
 
   const canRelist =
     ["expired", "completed", "closed", "sold", "cancelled"].includes(status) &&
     !isLoading;
 
-  const hasDelivery =
-    !!deliveryStatus &&
-    [
-      "pickupscheduled",
-      "accepted",
-      "intransit",
-      "outfordelivery",
-      "delivered",
-      "completed",
-    ].includes(
-      deliveryStatus
-        .toLowerCase()
-        .replace(/[-_]/g, "")
+  /* ------------------------------------------------------------
+     PICKUP STATE (SELLER PIPELINE ONLY)
+  ------------------------------------------------------------ */
+  const pickupStatus = delivery?.pickupStatus || null;
+
+  const hasPickupActivity =
+    pickupStatus &&
+    ["pending_seller_confirmation", "pickup_proposed", "pickup_confirmed"].includes(
+      pickupStatus
     );
 
   const bothConfirmed =
-    delivery.buyerConfirmedAt &&
-    delivery.sellerConfirmedAt;
+    delivery?.buyerConfirmedAt && delivery?.sellerConfirmedAt;
 
   /* ------------------------------------------------------------
      SAFE CLICK
@@ -130,15 +80,9 @@ export default function ListingCard({
      FORMAT DATE
   ------------------------------------------------------------ */
   const formatDate = () => {
-    try {
-      const date = listingData.updatedAt || listingData.createdAt;
-      if (date?.toDate) {
-        return date.toDate().toLocaleDateString();
-      }
-      if (date) {
-        return new Date(date).toLocaleDateString();
-      }
-    } catch {}
+    const d = listing.updatedAt || listing.createdAt;
+    if (d?.toDate) return d.toDate().toLocaleDateString();
+    if (d) return new Date(d).toLocaleDateString();
     return "—";
   };
 
@@ -150,100 +94,65 @@ export default function ListingCard({
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       onClick={safeClick}
-      className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all cursor-pointer relative"
+      className="bg-white rounded-xl border shadow-sm hover:shadow-md transition cursor-pointer relative"
     >
       {/* IMAGE */}
-      <div className="relative w-full h-48 bg-gray-100 rounded-t-xl overflow-hidden">
+      <div className="relative h-48 overflow-hidden rounded-t-xl bg-gray-100">
         <img
           src={image}
-          alt={getTitle()}
-          className="w-full h-full object-cover hover:scale-105 transition duration-300"
+          alt={listing.title}
+          className="w-full h-full object-cover hover:scale-105 transition"
           onError={(e) => {
-            e.currentTarget.onerror = null;
             e.currentTarget.src = "/images/default-item.jpg";
           }}
         />
 
-        {/* STATUS BADGE */}
-        <div className="absolute top-2 left-2 z-10 bg-black/70 text-white text-xs font-medium px-2 py-1 rounded-full">
-          {status.charAt(0).toUpperCase() + status.slice(1)}
+        {/* LISTING STATUS */}
+        <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded-full">
+          {status}
         </div>
 
-        {/* DELIVERY BADGE */}
-        {hasDelivery && showDeliveryInfo && (
-          <div className="absolute top-10 left-2 z-10 bg-green-600 text-white text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1">
-            <Truck size={10} />
-            <span>Delivery In Progress</span>
-          </div>
-        )}
-
-        {/* PICKUP BADGE (FREE ITEMS) */}
-        {hasScheduledPickup && isFreeItem && (
-          <div className="absolute top-18 left-2 z-10 bg-indigo-600 text-white text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1">
+        {/* PICKUP BADGE */}
+        {hasPickupActivity && isFreeItem && (
+          <div className="absolute top-10 left-2 bg-indigo-600 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
             <Calendar size={10} />
-            <span>
-              Pickup {delivery.pickupStatus}
-            </span>
+            Pickup {pickupStatus.replace(/_/g, " ")}
           </div>
         )}
 
-        {/* COMPLETED BADGE */}
+        {/* COMPLETED */}
         {bothConfirmed && (
-          <div className="absolute top-2 right-2 z-10 bg-green-700 text-white text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1">
+          <div className="absolute top-2 right-2 bg-green-700 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
             <Check size={10} />
-            <span>Completed</span>
+            Completed
           </div>
         )}
       </div>
 
-      {/* ACTION BUTTONS */}
-      <div className="absolute top-3 right-3 z-20 flex gap-2">
-        {/* SCHEDULE PICKUP — FREE ITEMS */}
-        {isSeller &&
-          isFreeItem &&
-          hasActiveRequest &&
-          !hasScheduledPickup && (
-            <button
-              className="action-btn bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-full shadow-md transition hover:scale-110"
-              onClick={(e) => {
-                e.stopPropagation();
-                onSchedulePickup();
-              }}
-              title="Schedule Pickup"
-            >
-              <Calendar size={14} />
-            </button>
-          )}
-
-        {/* RELIST */}
+      {/* ACTIONS */}
+      <div className="absolute top-3 right-3 flex gap-2 z-10">
         {canRelist && (
           <button
-            className="action-btn bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-md transition hover:scale-110"
+            className="action-btn bg-blue-600 text-white p-2 rounded-full"
             onClick={(e) => {
               e.stopPropagation();
               onRelist();
             }}
-            title="Relist Item"
           >
             <RefreshCw size={14} />
           </button>
         )}
 
-        {/* DELETE */}
         <button
           disabled={isLoading}
-          className="action-btn bg-red-600 hover:bg-red-700 text-white p-2 rounded-full shadow-md transition hover:scale-110 disabled:opacity-40"
+          className="action-btn bg-red-600 text-white p-2 rounded-full disabled:opacity-40"
           onClick={(e) => {
             e.stopPropagation();
             onDelete();
           }}
-          title="Delete Listing"
         >
           {isLoading ? (
-            <Loader2
-              className="animate-spin"
-              size={14}
-            />
+            <Loader2 className="animate-spin" size={14} />
           ) : (
             <Trash size={14} />
           )}
@@ -252,36 +161,27 @@ export default function ListingCard({
 
       {/* BODY */}
       <div className="p-4">
-        <h3 className="font-semibold text-gray-900 mb-1 line-clamp-2">
-          {getTitle()}
+        <h3 className="font-semibold mb-1 line-clamp-2">
+          {listing.title || "Untitled Listing"}
         </h3>
 
-        <p className="text-gray-600 text-sm mb-3 line-clamp-2">
-          {getDescription()}
+        <p className="text-sm text-gray-600 line-clamp-2 mb-2">
+          {listing.description || "No description provided"}
         </p>
 
-        {/* PRICE */}
-        {listingData.price && (
-          <p className="text-sm font-semibold text-indigo-700 mb-2">
-            ¥{(listingData.price || 0).toLocaleString()}
-          </p>
-        )}
-
-        {/* CONDITION */}
-        {listingData.condition && (
+        {listing.condition && (
           <p className="text-xs text-gray-500 mb-2">
-            Condition: {listingData.condition}
+            Condition: {listing.condition}
           </p>
         )}
 
-        {/* STATUS + DATE */}
-        <div className="flex items-center justify-between mt-2">
-          <StatusBadge
-            status={status}
-            deliveryStatus={deliveryStatus}
-            isPremium={listingData.type === "premium"}
-          />
+        {/* SELLER PICKUP PIPELINE */}
+        {isFreeItem && delivery && (
+          <SellerPickupScheduler delivery={delivery} />
+        )}
 
+        <div className="flex justify-between items-center mt-3">
+          <StatusBadge status={status} />
           <span className="text-xs text-gray-500">
             {formatDate()}
           </span>

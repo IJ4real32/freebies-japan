@@ -286,30 +286,52 @@ export const adminVerifyMoneyDonation = async ({ donationId, verify, note }) => 
   return res?.data || { ok: false };
 };
 
+
 // =====================================================
-// PAYMENT HANDLING (DEPOSIT + COD)
+// ADMIN: APPROVE PAYMENT & START DELIVERY (PHASE 2)
 // =====================================================
 
-export const adminApproveDeposit = async ({ paymentId, reportId }) => {
+export const adminApprovePaymentAndCreateDelivery = async ({ paymentId }) => {
   await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "approveDeposit");
-  const res = await callable({ paymentId, reportId });
-  return res?.data || { ok: false };
-};
 
-export const adminRejectDeposit = async ({ paymentId, reportId, reason }) => {
-  await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "rejectDeposit");
-  const res = await callable({ paymentId, reportId, reason });
-  return res?.data || { ok: false };
-};
+  const callable = httpsCallable(
+    functionsRegion,
+    "adminApprovePaymentAndCreateDelivery"
+  );
 
-export const markPaymentDelivered = async ({ paymentId }) => {
-  await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "markPaymentDelivered");
   const res = await callable({ paymentId });
   return res?.data || { ok: false };
 };
+export const adminRejectPayment = async ({ paymentId, reason }) => {
+  await ensureFreshIdToken();
+  const callable = httpsCallable(functionsRegion, "adminRejectPayment");
+  const res = await callable({ paymentId, reason });
+  return res?.data || { ok: false };
+};
+
+// =====================================================
+// ADMIN: DELIVERY BACKFILL (PHASE 2)
+// =====================================================
+
+export const adminBackfillDelivery = async ({
+  itemId,
+  donorType = "seller",
+}) => {
+  await ensureFreshIdToken();
+
+  const callable = httpsCallable(
+    functionsRegion,
+    "adminBackfillDelivery"
+  );
+
+  const res = await callable({
+    itemId,
+    donorType,
+  });
+
+  return res?.data || { ok: false };
+};
+
 
 // =====================================================
 // NOTIFICATIONS

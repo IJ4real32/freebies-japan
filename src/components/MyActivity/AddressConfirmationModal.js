@@ -1,5 +1,5 @@
 // ✅ FILE: src/components/MyActivity/AddressConfirmationModal.jsx
-// PHASE-2 FINAL — UI-only modal (backend handled by parent)
+// PHASE-2 FINAL — Backend-authoritative payload
 
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
@@ -20,7 +20,13 @@ const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Reset form when modal opens / closes
+  // --------------------------------------------------
+  // HARD GUARD — WRITE ONCE
+  // --------------------------------------------------
+  const addressAlreadySubmitted =
+    request?.addressSubmitted === true ||
+    (!!request?.deliveryAddress && !!request?.deliveryPhone);
+
   useEffect(() => {
     if (!open) {
       setAddress("");
@@ -31,7 +37,7 @@ const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
     }
   }, [open]);
 
-  if (!open || !request) return null;
+  if (!open || !request || addressAlreadySubmitted) return null;
 
   const handleSubmit = async () => {
     if (!address.trim() || !phone.trim()) {
@@ -48,19 +54,18 @@ const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
     setError("");
 
     try {
-      // ⬇️ PASS DATA TO PARENT ONLY (NO BACKEND CALL HERE)
+      // 🔑 PHASE-2 CANONICAL PAYLOAD
       onConfirm?.({
-        item: request,
-        address: address.trim(),
-        phone: phone.trim(),
-        instructions: instructions.trim() || "",
+        requestId: request.requestId || request.id,
+        deliveryAddress: address.trim(),
+        deliveryPhone: phone.trim(),
+        deliveryInstructions: instructions.trim(),
       });
 
       window?.toast?.success?.("🎉 Delivery details submitted!");
-
       onClose();
     } catch (err) {
-      console.error("Address modal error:", err);
+      console.error("AddressConfirmationModal error:", err);
       setError("Failed to submit delivery details.");
     } finally {
       setLoading(false);
@@ -70,7 +75,6 @@ const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[999]">
       <div className="bg-white rounded-xl max-w-md w-full shadow-xl overflow-hidden">
-
         {/* HEADER */}
         <div className="p-6 border-b flex items-center justify-between">
           <div>
@@ -81,10 +85,7 @@ const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
             <p className="text-sm text-gray-600 mt-1">
               For item:{" "}
               <strong>
-                {request.itemData?.title ||
-                  request.itemName ||
-                  request.itemTitle ||
-                  "Unknown Item"}
+                {request.itemTitle || "Unknown Item"}
               </strong>
             </p>
           </div>
@@ -98,14 +99,13 @@ const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
         </div>
 
         {/* BODY */}
-        <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+        <div className="p-6 space-y-4">
           {error && (
             <div className="bg-red-50 text-red-700 border border-red-200 p-3 rounded-lg">
               {error}
             </div>
           )}
 
-          {/* Address */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
               <MapPin className="w-4 h-4" /> Delivery Address *
@@ -114,12 +114,10 @@ const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
               value={address}
               onChange={(e) => setAddress(e.target.value)}
               rows={3}
-              placeholder="Full delivery address..."
-              className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+              className="w-full border rounded-lg px-3 py-2"
             />
           </div>
 
-          {/* Phone */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
               <Phone className="w-4 h-4" /> Phone Number *
@@ -128,12 +126,10 @@ const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
               type="tel"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              placeholder="Courier contact number"
-              className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+              className="w-full border rounded-lg px-3 py-2"
             />
           </div>
 
-          {/* Instructions */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
               <MessageSquare className="w-4 h-4" /> Instructions (Optional)
@@ -142,8 +138,7 @@ const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
               rows={2}
               value={instructions}
               onChange={(e) => setInstructions(e.target.value)}
-              placeholder="Landmarks, gate code, notes..."
-              className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+              className="w-full border rounded-lg px-3 py-2"
             />
           </div>
         </div>
@@ -153,7 +148,7 @@ const AddressConfirmationModal = ({ open, onClose, request, onConfirm }) => {
           <button
             disabled={loading}
             onClick={onClose}
-            className="px-4 py-2 bg-white border rounded-lg text-gray-700"
+            className="px-4 py-2 bg-white border rounded-lg"
           >
             Cancel
           </button>
