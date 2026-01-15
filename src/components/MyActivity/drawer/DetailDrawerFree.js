@@ -1,12 +1,6 @@
 // ===================================================================
 // DetailDrawerFree.jsx
-// PHASE-2 FINAL — FREE ITEM DETAIL DRAWER (SAFE + AUTHORITATIVE)
-// ===================================================================
-// Rules:
-// - READ-ONLY delivery timeline
-// - deliveryData is the Phase-2 source of truth
-// - deliveryDetails supported as legacy fallback
-// - No backend mutations here
+// PHASE-2 FINAL — FREE ITEM DETAIL DRAWER (AUTHORITATIVE)
 // ===================================================================
 
 import React from "react";
@@ -18,147 +12,120 @@ import {
   Truck,
   CheckCircle,
   Clock,
+  Home,
 } from "lucide-react";
 
 import StatusBadge from "../StatusBadge";
 import SellerPickupScheduler from "../../Logistics/SellerPickupScheduler";
 import RecipientConfirmDelivery from "../RecipientConfirmDelivery";
 
-/* =========================================================
- * COMPONENT
- * ======================================================= */
 export default function DetailDrawerFree({
   open,
   item,
   currentUser,
   onClose,
-
-  // Award actions (buyer only)
   onAcceptAward,
   onDeclineAward,
+  onSubmitAddress,
 }) {
   if (!open || !item) return null;
 
-  const {
-    status,
-    userId,        // buyer
-    ownerId,       // seller
-    donation = {},
-  } = item;
+  const donation = item.donation || {};
+  const delivery = item.deliveryData || {};
 
-  const {
-    title,
-    description,
-    images = [],
-  } = donation;
+  const deliveryStatus = delivery.deliveryStatus || "";
 
-  // 🔑 PHASE-2 DELIVERY SOURCE OF TRUTH
-  const delivery =
-    item.deliveryData ||
-    item.deliveryDetails ||
-    {};
+  /* -------------------------------------------------
+   * ROLES (AUTHORITATIVE)
+   * ------------------------------------------------- */
+  const isBuyer = currentUser?.uid === delivery.buyerId;
+  const isSeller = currentUser?.uid === delivery.sellerId;
 
-  const isBuyer = currentUser?.uid === userId;
-  const isSeller = currentUser?.uid === ownerId;
-
-  /* =====================================================
-   * NORMALIZED DELIVERY STATUS (Phase-2 safe)
-   * =================================================== */
-  const normalizedDeliveryStatus = (
-    delivery.status ||
-    delivery.deliveryStatus ||
-    ""
-  )
-    .toLowerCase()
-    .replace(/[-_]/g, "");
-
-  /* =====================================================
-   * ADDRESS & TERMINAL FLAGS (AUTHORITATIVE)
-   * =================================================== */
-  const hasAddress =
-    delivery.addressSubmitted === true ||
-    (!!delivery.deliveryAddress && !!delivery.deliveryPhone);
-
+  /* -------------------------------------------------
+   * FLAGS (AUTHORITATIVE)
+   * ------------------------------------------------- */
+  const hasAddress = delivery.addressSubmitted === true;
   const isClosed =
-    delivery.forceClosed === true ||
-    normalizedDeliveryStatus === "completed" ||
-    normalizedDeliveryStatus === "forceclosed";
+  deliveryStatus === "completed" ||
+  deliveryStatus === "force_closed";
 
-  /* =====================================================
-   * SELLER PICKUP GUARD (STRICT)
-   * =================================================== */
+  /* -------------------------------------------------
+   * ACTION GUARDS (PHASE-2 CANONICAL)
+   * ------------------------------------------------- */
+  const canAcceptAward =
+  isBuyer &&
+  deliveryStatus === "pending_recipient_confirmation" &&
+  !isClosed;
+
+ 
+
+
+  const canSubmitAddress =
+    isBuyer &&
+    deliveryStatus === "awaiting_address" &&
+    !hasAddress &&
+    !isClosed;
+
   const canSellerSchedulePickup =
     isSeller &&
-    hasAddress &&
-    !isClosed &&
-    delivery.pickupStatus !== "pickup_confirmed";
+    deliveryStatus === "pickup_requested" &&
+    !isClosed;
 
-  /* =====================================================
-   * BUYER CONFIRMATION GUARD (FREE ITEMS)
-   * =================================================== */
-  const canRecipientConfirm =
+  const canConfirmDelivery =
     isBuyer &&
-    delivery.deliveryStatus === "delivered" &&
-    delivery.recipientConfirmed !== true &&
-    delivery.forceClosed !== true;
+    deliveryStatus === "delivered" &&
+    delivery.buyerConfirmed !== true &&
+    !isClosed;
 
-  /* =====================================================
-   * READ-ONLY DELIVERY TIMELINE (AUTHORITATIVE)
-   * =================================================== */
+  /* -------------------------------------------------
+   * DELIVERY TIMELINE (READ-ONLY, ACCURATE)
+   * ------------------------------------------------- */
   const timeline = [
     {
-      key: "award",
       label: "Award accepted",
       icon: Award,
-      done:
-        status === "accepted" ||
-        hasAddress ||
-        normalizedDeliveryStatus !== "",
+     done: deliveryStatus === "awaiting_address" ||
+      deliveryStatus === "pickup_requested" ||
+      deliveryStatus === "pickup_scheduled" ||
+      deliveryStatus === "pickup_confirmed" ||
+      deliveryStatus === "in_transit" ||
+      deliveryStatus === "delivered" ||
+      deliveryStatus === "completed",
+
     },
     {
-      key: "address",
       label: "Address submitted",
       icon: MapPin,
       done: hasAddress,
     },
     {
-      key: "pickup",
       label: "Pickup scheduled",
       icon: Calendar,
-      done:
-        normalizedDeliveryStatus === "pickupscheduled" ||
-        normalizedDeliveryStatus === "pickupconfirmed" ||
-        normalizedDeliveryStatus === "intransit" ||
-        normalizedDeliveryStatus === "outfordelivery" ||
-        normalizedDeliveryStatus === "delivered" ||
-        normalizedDeliveryStatus === "completed",
+      done: ["pickup_scheduled", "pickup_confirmed", "in_transit", "delivered", "completed"].includes(
+        deliveryStatus
+      ),
     },
     {
-      key: "transit",
       label: "In transit",
       icon: Truck,
-      done:
-        normalizedDeliveryStatus === "intransit" ||
-        normalizedDeliveryStatus === "outfordelivery" ||
-        normalizedDeliveryStatus === "delivered" ||
-        normalizedDeliveryStatus === "completed",
+      done: ["in_transit", "delivered", "completed"].includes(
+        deliveryStatus
+      ),
     },
     {
-      key: "completed",
       label: "Delivered",
       icon: CheckCircle,
-      done:
-        normalizedDeliveryStatus === "delivered" ||
-        normalizedDeliveryStatus === "completed",
+      done: ["delivered", "completed"].includes(deliveryStatus),
     },
   ];
 
-  /* =====================================================
+  /* -------------------------------------------------
    * UI
-   * =================================================== */
+   * ------------------------------------------------- */
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex justify-end">
       <div className="bg-white w-full max-w-md h-full overflow-y-auto shadow-xl">
+
         {/* HEADER */}
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <h2 className="text-lg font-semibold">Item details</h2>
@@ -167,48 +134,40 @@ export default function DetailDrawerFree({
           </button>
         </div>
 
-        {/* CONTENT */}
         <div className="p-4 space-y-6">
-          {/* IMAGE */}
-          {images[0] && (
+
+          {donation.images?.[0] && (
             <img
-              src={images[0]}
-              alt={title}
+              src={donation.images[0]}
+              alt={donation.title}
               className="w-full h-48 object-cover rounded-lg"
             />
           )}
 
-          {/* TITLE */}
           <div>
-            <h3 className="text-xl font-semibold">{title}</h3>
+            <h3 className="text-xl font-semibold">{donation.title}</h3>
             <p className="text-sm text-gray-600 mt-1">
-              {description}
+              {donation.description || "No description available."}
             </p>
           </div>
 
-          {/* STATUS BADGE */}
-          <div>
-            <StatusBadge
-              status={status}
-              deliveryStatus={
-                delivery.status || delivery.deliveryStatus
-              }
-              isListing={false}
-            />
-          </div>
+          <StatusBadge
+            status={item.status}
+            deliveryStatus={deliveryStatus}
+            isListing={false}
+          />
 
-          {/* DELIVERY TIMELINE */}
           <div>
             <h4 className="text-sm font-semibold mb-3 text-gray-700">
               Delivery progress
             </h4>
 
             <div className="space-y-3">
-              {timeline.map((step) => {
+              {timeline.map((step, i) => {
                 const Icon = step.icon;
                 return (
                   <div
-                    key={step.key}
+                    key={i}
                     className={`flex items-center gap-3 p-3 rounded-lg border ${
                       step.done
                         ? "bg-emerald-50 border-emerald-200"
@@ -237,42 +196,58 @@ export default function DetailDrawerFree({
             </div>
           </div>
 
-          {/* SELLER PICKUP SCHEDULER */}
-          {canSellerSchedulePickup && (
-            <SellerPickupScheduler delivery={delivery} />
+          {canAcceptAward && (
+            <div className="pt-4 border-t">
+              <p className="text-sm text-gray-600 mb-3">
+                You’ve been awarded this item.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={onAcceptAward}
+                  className="flex-1 bg-emerald-600 text-white py-2 rounded-lg"
+                >
+                  Accept
+                </button>
+                <button
+                  onClick={onDeclineAward}
+                  className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg"
+                >
+                  Decline
+                </button>
+              </div>
+            </div>
           )}
 
-          {/* BUYER CONFIRM DELIVERY (FINAL STEP) */}
-          {canRecipientConfirm && (
+          {canSubmitAddress && (
+            <div className="pt-4 border-t">
+              <button
+                onClick={onSubmitAddress}
+                className="w-full bg-blue-600 text-white py-2 rounded-lg"
+              >
+                Submit Delivery Address
+              </button>
+            </div>
+          )}
+
+         {canSellerSchedulePickup && (
+  <SellerPickupScheduler
+    delivery={delivery}
+    currentUserId={currentUser?.uid}
+  />
+)}
+
+
+          {canConfirmDelivery && (
             <RecipientConfirmDelivery
               request={item}
               onDone={onClose}
             />
           )}
 
-          {/* BUYER AWARD ACTIONS (LOCKED AFTER ADDRESS) */}
-          {isBuyer && status === "awarded" && !hasAddress && (
-            <div className="flex gap-3">
-              <button
-                onClick={onAcceptAward}
-                className="flex-1 bg-emerald-600 text-white py-2 rounded-lg"
-              >
-                Accept
-              </button>
-              <button
-                onClick={onDeclineAward}
-                className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg"
-              >
-                Decline
-              </button>
-            </div>
-          )}
-
-          {/* FALLBACK */}
-          {!status && (
+          {!deliveryStatus && (
             <div className="flex items-center gap-2 text-sm text-gray-500">
               <Clock className="w-4 h-4" />
-              Waiting for activity
+              Waiting for delivery initialization…
             </div>
           )}
         </div>

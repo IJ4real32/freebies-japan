@@ -1,6 +1,6 @@
 // ===================================================================
 // AdminPickupConfirmation.jsx
-// PHASE-2 FINAL — Admin confirms seller pickup date
+// PHASE-2 FINAL — Admin confirms seller pickup date (CANONICAL)
 // ===================================================================
 
 import React, { useState } from "react";
@@ -14,12 +14,12 @@ export default function AdminPickupConfirmation({ delivery, isAdmin }) {
   const [loading, setLoading] = useState(false);
 
   // --------------------------------------------------
-  // HARD GUARDS — PHASE-2 CORRECT
+  // HARD GUARDS — PHASE-2 CANONICAL
   // --------------------------------------------------
   if (!isAdmin) return null;
   if (!delivery) return null;
 
-  // Address must exist (award accepted)
+  // Address must be submitted
   const addressReady =
     delivery.addressSubmitted === true ||
     (!!delivery.deliveryAddress && !!delivery.deliveryPhone);
@@ -28,15 +28,20 @@ export default function AdminPickupConfirmation({ delivery, isAdmin }) {
 
   // Seller must have proposed pickup dates
   if (
-    !Array.isArray(delivery.proposedPickupDates) ||
-    delivery.proposedPickupDates.length === 0
+    !Array.isArray(delivery.sellerPickupOptions) ||
+    delivery.sellerPickupOptions.length === 0
   ) {
+    return null;
+  }
+
+  // Only allow during pickup_requested phase
+  if (delivery.deliveryStatus !== "pickup_requested") {
     return null;
   }
 
   // Do not show if already confirmed or terminal
   if (
-    delivery.pickupStatus === "confirmed" ||
+    delivery.pickupStatus === "pickup_confirmed" ||
     delivery.deliveryStatus === "completed" ||
     delivery.deliveryStatus === "force_closed"
   ) {
@@ -57,12 +62,12 @@ export default function AdminPickupConfirmation({ delivery, isAdmin }) {
     try {
       const confirmPickup = httpsCallable(
         functions,
-        "adminConfirmPickupDate"
+        "confirmPickupDate"
       );
 
       await confirmPickup({
         requestId: delivery.requestId,
-        confirmedPickupDate: selectedDate,
+        selectedDate,
       });
 
       toast.success("Pickup date confirmed");
@@ -76,6 +81,9 @@ export default function AdminPickupConfirmation({ delivery, isAdmin }) {
     }
   };
 
+  // --------------------------------------------------
+  // UI
+  // --------------------------------------------------
   return (
     <div className="mt-4 p-4 rounded-lg border bg-white">
       <h4 className="flex items-center gap-2 text-sm font-semibold mb-3">
@@ -84,7 +92,7 @@ export default function AdminPickupConfirmation({ delivery, isAdmin }) {
       </h4>
 
       <div className="space-y-2">
-        {delivery.proposedPickupDates.map((dateValue, idx) => {
+        {delivery.sellerPickupOptions.map((dateValue, idx) => {
           const date =
             typeof dateValue === "string"
               ? new Date(dateValue)

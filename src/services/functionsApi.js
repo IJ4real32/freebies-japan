@@ -81,44 +81,104 @@ export const cancelPremiumTransaction = async ({ itemId, reason }) => {
 };
 
 // =====================================================
-// FREE REQUEST WORKFLOW
+// FREE REQUEST WORKFLOW — PHASE-2 DEBUG SAFE
 // =====================================================
 
 export const onRequestCreateAddTicket = async ({ itemId }) => {
   await ensureFreshIdToken();
 
-  const callable = httpsCallable(
-    functionsRegion,
-    "onRequestCreateAddTicket"
-  );
+  try {
+    console.log("🟡 [functionsApi] onRequestCreateAddTicket → start", {
+      itemId,
+    });
 
-  const res = await callable({ itemId });
-  const data = res?.data || {};
+    const callable = httpsCallable(
+      functionsRegion,
+      "onRequestCreateAddTicket"
+    );
 
-  // Phase-2 idempotent handling
-  if (data.alreadyRequested) {
-    return {
-      ok: true,
-      alreadyRequested: true,
-      availabilityCycle: data.availabilityCycle,
-    };
-  }
+    const res = await callable({ itemId });
 
-  if (data.requestCreated) {
-    return {
-      ok: true,
-      requestCreated: true,
-      requestId: data.requestId,
-      availabilityCycle: data.availabilityCycle,
-    };
-  }
+    console.log("🟢 [functionsApi] callable response FULL:", res);
+    console.log("🟢 [functionsApi] callable response.data:", res?.data);
 
-  // Fallback (should not happen in Phase-2)
-  return { ok: false };
+    const data = res?.data;
+
+    // 🚨 HARD GUARD — backend returned nothing
+    if (!data || typeof data !== "object") {
+      console.error("🔴 [functionsApi] Invalid callable response:", data);
+      return {
+        ok: false,
+        error: "INVALID_RESPONSE",
+        message: "Backend returned no data",
+      };
+    }
+
+    // ✅ Phase-2 idempotent handling
+    if (data.alreadyRequested === true) {
+      return {
+        ok: true,
+        alreadyRequested: true,
+        availabilityCycle: data.availabilityCycle ?? null,
+      };
+    }
+
+    if (data.requestCreated === true) {
+      return {
+        ok: true,
+        requestCreated: true,
+        requestId: data.requestId ?? null,
+        availabilityCycle: data.availabilityCycle ?? null,
+      };
+    }
+
+    // 🚨 Backend explicitly rejected
+    if (data.ok === false || data.error) {
+      console.error("🔴 [functionsApi] Backend rejected request:", data);
+      return {
+        ok: false,
+        error: data.error || "BACKEND_REJECTED",
+        message: data.message || "Request rejected by backend",
+      };
+    }
+    // ✅ LEGACY / COMPAT SUCCESS SHAPE
+if (data.ok === true && data.requestId) {
+  return {
+    ok: true,
+    requestCreated: true,
+    requestId: data.requestId,
+  };
+}
+
+// 🚨 Truly unexpected
+console.error("🔴 [functionsApi] Unexpected backend response shape:", data);
+
+return {
+  ok: false,
+  error: "UNEXPECTED_RESPONSE",
+  message: "Unexpected backend response",
+  raw: data,
 };
 
 
-// decrement trial credit
+   
+
+  } catch (err) {
+    console.error("🔴 [functionsApi] Callable invocation FAILED:", {
+      message: err?.message,
+      code: err?.code,
+      details: err?.details,
+      stack: err?.stack,
+    });
+
+    throw err; // 🔥 IMPORTANT: let Items.js catch this
+  }
+};
+
+// =====================================================
+// TRIAL CREDIT — UNCHANGED
+// =====================================================
+
 export const decrementTrialCredit = async () => {
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "decrementTrialCredit");
@@ -171,16 +231,17 @@ export const submitDeliveryDetails = async ({
   }
 };
 
-export const recipientConfirmDelivery = async ({ donationId, accepted }) => {
+export const recipientConfirmDelivery = async ({ requestId }) => {
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "recipientConfirmDelivery");
-  const res = await callable({ donationId, accepted });
+  const res = await callable({ requestId });
   return res?.data || { ok: false };
 };
 
+
 export const triggerShipmentBooking = async ({ donationId }) => {
   await ensureFreshIdToken();
-  const callable = httpsCallable(functionsRegion, "triggerShipmentBooking");
+  const callable = httpsCallable(functionsRegion, "triggerShipmentBooking");// @deprecated — Phase-2 does not auto-book shipment
   const res = await callable({ donationId });
   return res?.data || { ok: false };
 };
@@ -197,8 +258,8 @@ export const cancelDonationForDonor = async ({ donationId, reason }) => {
 
 // Seller proposes pickup dates
 export const submitSellerPickupOptions = async ({
-  deliveryId,
-  dates,
+  requestId,
+  pickupOptions,
 }) => {
   await ensureFreshIdToken();
 
@@ -208,17 +269,18 @@ export const submitSellerPickupOptions = async ({
   );
 
   const res = await callable({
-    deliveryId,
-    dates,
+    requestId,
+    pickupOptions,
   });
 
   return res?.data || { ok: false };
 };
 
+
 // Admin confirms one pickup date
 export const confirmPickupDate = async ({
-  deliveryId,
-  selectedDate,
+  requestId,
+  selectedOption,
 }) => {
   await ensureFreshIdToken();
 
@@ -228,13 +290,31 @@ export const confirmPickupDate = async ({
   );
 
   const res = await callable({
-    deliveryId,
-    selectedDate,
+    requestId,
+    selectedOption,
   });
 
   return res?.data || { ok: false };
 };
 
+export const rejectPickupOptions = async ({
+  requestId,
+  reason,
+}) => {
+  await ensureFreshIdToken();
+
+  const callable = httpsCallable(
+    functionsRegion,
+    "rejectPickupOptions"
+  );
+
+  const res = await callable({
+    requestId,
+    reason,
+  });
+
+  return res?.data || { ok: false };
+};
 
 // =====================================================
 // ADMIN: FREE ITEM REQUEST MODERATION
@@ -257,6 +337,22 @@ export const adminRunLottery = async ({ itemId }) => {
 export const adminRelistDonation = async ({ donationId }) => {
   await ensureFreshIdToken();
   const callable = httpsCallable(functionsRegion, "adminRelistDonation");
+  const res = await callable({ donationId });
+  return res?.data || { ok: false };
+};
+
+// =====================================================
+// ADMIN: USER DONATION APPROVAL (PHASE 2 CANONICAL)
+// =====================================================
+
+export const adminApproveDonation = async ({ donationId }) => {
+  await ensureFreshIdToken();
+
+  const callable = httpsCallable(
+    functionsRegion,
+    "adminApproveDonation"
+  );
+
   const res = await callable({ donationId });
   return res?.data || { ok: false };
 };

@@ -103,64 +103,84 @@ const StatusBadge = ({
   };
 
   /* ==========================================================
-     FREE CONFIG — UI STATES ONLY (AUTHORITATIVE)
-  ========================================================== */
-  const freeConfig = {
-    pending: {
-      color: "bg-yellow-100 text-yellow-800 border-yellow-200",
-      icon: Clock,
-      label: "Pending",
-      step: 0,
-    },
-    accepted: {
-      color: "bg-green-100 text-green-800 border-green-200",
-      icon: UserCheck,
-      label: "Accepted",
-      step: 2,
-    },
-    in_transit: {
-      color: "bg-purple-100 text-purple-800 border-purple-200",
-      icon: Truck,
-      label: "In Transit",
-      step: 4,
-    },
-    completed: {
-      color: "bg-teal-100 text-teal-800 border-teal-200",
-      icon: CheckCircle,
-      label: "Completed",
-      step: 6,
-    },
-    cancelled: {
-      color: "bg-gray-100 text-gray-800 border-gray-200",
-      icon: XCircle,
-      label: "Cancelled",
-      step: -1,
-    },
-    force_closed: {
-      color: "bg-red-100 text-red-800 border-red-300",
-      icon: XCircle,
-      label: "Force Closed",
-      step: -1,
-    },
-  };
+   FREE CONFIG — UI STATES ONLY (AUTHORITATIVE)
+   Backend source of truth:
+   deliveryDetails.deliveryStatus
+========================================================== */
+const freeConfig = {
+  pending: {
+    color: "bg-yellow-100 text-yellow-800 border-yellow-200",
+    icon: Clock,
+    label: "Pending",
+    step: 0, // request created / awaiting award or acceptance
+  },
+
+  accepted: {
+    color: "bg-green-100 text-green-800 border-green-200",
+    icon: UserCheck,
+    label: "Accepted",
+    step: 1, // buyer accepted award OR address submitted
+  },
+
+  in_transit: {
+    color: "bg-purple-100 text-purple-800 border-purple-200",
+    icon: Truck,
+    label: "In Transit",
+    step: 3, // logistics in progress
+  },
+
+  completed: {
+    color: "bg-teal-100 text-teal-800 border-teal-200",
+    icon: CheckCircle,
+    label: "Completed",
+    step: 4, // delivered & confirmed
+  },
+
+  cancelled: {
+    color: "bg-gray-100 text-gray-800 border-gray-200",
+    icon: XCircle,
+    label: "Cancelled",
+    step: -1,
+  },
+
+  force_closed: {
+    color: "bg-red-100 text-red-800 border-red-300",
+    icon: XCircle,
+    label: "Force Closed",
+    step: -1,
+  },
+};
+
 
   /* ==========================================================
      FREE STATUS RESOLVER — PHASE-2 CANONICAL
      deliveryDetails.deliveryStatus is the ONLY source of truth
   ========================================================== */
-  const freeStatusMap = {
-    pending: "pending",
-    recipient_accepted: "accepted",
-    pickup_requested: "accepted",
-    pickup_confirmed: "accepted",
-    in_transit: "in_transit",
-    completed: "completed",
-    cancelled: "cancelled",
-    force_closed: "force_closed",
-  };
+const freeStatusMap = {
+  // Award phase
+  pending_recipient_confirmation: "pending",
+  awaiting_address: "accepted",
 
-  const resolvedFreeStatus =
-    freeStatusMap[deliveryStatus] || "pending";
+  // Pickup phase
+  pickup_requested: "accepted",
+  pickup_scheduled: "accepted",
+  pickup_confirmed: "accepted",
+
+  // Delivery phase
+  in_transit: "in_transit",
+  delivered: "completed",
+  completed: "completed",
+
+  // Terminal
+  cancelled: "cancelled",
+  force_closed: "force_closed",
+};
+
+const resolvedFreeStatus =
+  deliveryStatus
+    ? freeStatusMap[deliveryStatus] || "pending"
+    : "pending";
+
 
   /* ==========================================================
      FINAL CONFIG RESOLUTION
@@ -181,7 +201,8 @@ const StatusBadge = ({
   const showProgress =
     showTimeline && !isTerminal && !isListing;
 
-  const pipelineSteps = 7;
+  const pipelineSteps = isPremium ? 7 : 5;
+
 
   return (
     <div className="flex flex-col gap-1">

@@ -1,6 +1,13 @@
 // ============================================================================
 // FILE: src/components/MyActivity/hooks/useMyListings.js
-// PHASE-2 FINAL — SELLER LISTINGS (AUTHORITATIVE, NO REGRESSIONS)
+// PHASE-2 CANONICAL — SELLER LISTINGS (DELIVERY-AUTHORITATIVE)
+// ============================================================================
+// RULES:
+// - Seller listings come ONLY from donations
+// - At most ONE active delivery per donation
+// - deliveryDetails is the SINGLE source of truth
+// - request.status is NON-authoritative (UI only)
+// - NEVER crash on permission or missing docs
 // ============================================================================
 
 import { useState, useEffect } from "react";
@@ -9,11 +16,30 @@ import {
   query,
   where,
   onSnapshot,
-  getDoc,
   getDocs,
+  getDoc,
   doc,
 } from "firebase/firestore";
 import { db } from "../../../firebase";
+
+/* ------------------------------------------------------------
+ * DELIVERY TERMINAL STATES — PHASE-2
+ * ---------------------------------------------------------- */
+const TERMINAL_DELIVERY_STATES = [
+  "completed",
+  "force_closed",
+  "cancelled",
+];
+
+/* ------------------------------------------------------------
+ * HELPERS
+ * ---------------------------------------------------------- */
+const isActiveDelivery = (delivery) => {
+  if (!delivery?.deliveryStatus) return false;
+  return !TERMINAL_DELIVERY_STATES.includes(
+    delivery.deliveryStatus
+  );
+};
 
 export default function useMyListings(uid) {
   const [listings, setListings] = useState([]);
@@ -26,9 +52,9 @@ export default function useMyListings(uid) {
       return;
     }
 
-    // ------------------------------------------------------------------
-    // 1️⃣ Seller listings come ONLY from donations (authoritative)
-    // ------------------------------------------------------------------
+    /* ----------------------------------------------------------
+     * 1️⃣ LISTEN TO SELLER DONATIONS (AUTHORITATIVE)
+     * -------------------------------------------------------- */
     const q = query(
       collection(db, "donations"),
       where("donorId", "==", uid)
@@ -37,58 +63,99 @@ export default function useMyListings(uid) {
     const unsub = onSnapshot(
       q,
       async (snapshot) => {
-        const baseList = snapshot.docs.map((d) => ({
+        const donations = snapshot.docs.map((d) => ({
           id: d.id,
           ...d.data(),
         }));
 
-        // ------------------------------------------------------------------
-        // 2️⃣ Enrich with request + delivery (PHASE-2 CANONICAL)
-        // ------------------------------------------------------------------
+        /* ------------------------------------------------------
+         * 2️⃣ ENRICH EACH DONATION WITH ACTIVE DELIVERY
+         * ---------------------------------------------------- */
         const enriched = await Promise.all(
-          baseList.map(async (donation) => {
-            let requestId = null;
-            let requestStatus = null;
+          donations.map(async (donation) => {
+            let activeRequestId = null;
             let deliveryData = null;
 
             try {
-              // ------------------------------------------------------------
-              // A️⃣ Find request linked to this donation
-              // ------------------------------------------------------------
-              const reqQuery = query(
-                collection(db, "requests"),
-                where("itemId", "==", donation.id)
-              );
+              /* ----------------------------------------------
+               * A️⃣ FAST PATH — ADMIN / LOTTERY AWARD
+               * -------------------------------------------- */
+              if (
+                donation.status === "awarded" &&
+                donation.winnerId
+              ) {
+                try {
+                  const reqSnap = await getDocs(
+                    query(
+                      collection(db, "requests"),
+                      where("itemId", "==", donation.id),
+                      where("userId", "==", donation.winnerId)
+                    )
+                  );
 
-              const reqSnap = await getDocs(reqQuery);
+                  if (!reqSnap.empty) {
+                    const reqDoc = reqSnap.docs[0];
+                    const deliverySnap = await getDoc(
+                      doc(db, "deliveryDetails", reqDoc.id)
+                    );
 
-              if (!reqSnap.empty) {
-                const reqDoc = reqSnap.docs[0];
-                requestId = reqDoc.id;
-                requestStatus = reqDoc.data().status;
-
-                // ------------------------------------------------------------
-                // B️⃣ Load deliveryDetails using requestId (NOT donationId)
-                // ------------------------------------------------------------
-                const deliverySnap = await getDoc(
-                  doc(db, "deliveryDetails", requestId)
-                );
-
-                deliveryData = deliverySnap.exists()
-                  ? deliverySnap.data()
-                  : null;
+                    if (
+                      deliverySnap.exists() &&
+                      isActiveDelivery(deliverySnap.data())
+                    ) {
+                      activeRequestId = reqDoc.id;
+                      deliveryData = {
+                        id: deliverySnap.id,
+                        ...deliverySnap.data(),
+                      };
+                    }
+                  }
+                } catch {
+                  // ignore — seller may not have request read permission
+                }
               }
-            } catch (err) {
-              // Permission-safe fallback (never crash UI)
+
+              /* ----------------------------------------------
+               * B️⃣ CANONICAL SELLER DELIVERY DISCOVERY
+               * -------------------------------------------- */
+              if (!activeRequestId) {
+                try {
+                  const deliverySnap = await getDocs(
+                    query(
+                      collection(db, "deliveryDetails"),
+                      where("itemId", "==", donation.id),
+                      where("sellerId", "==", uid)
+                    )
+                  );
+
+                  for (const d of deliverySnap.docs) {
+                    const data = d.data();
+
+                    if (isActiveDelivery(data)) {
+                      activeRequestId = d.id;
+                      deliveryData = {
+                        id: d.id,
+                        ...data,
+                      };
+                      break;
+                    }
+                  }
+                } catch {
+                  // permission-safe no-op
+                }
+              }
+            } catch {
+              // 🔒 HARD SAFETY — NEVER CRASH SELLER UI
+              activeRequestId = null;
               deliveryData = null;
             }
 
             return {
               ...donation,
 
-              // Phase-2 enrichment
-              requestId,
-              requestStatus,
+              // 🔑 Phase-2 canonical exposure
+              activeRequestId,
+              hasActiveRequest: Boolean(activeRequestId),
               deliveryData,
             };
           })
@@ -99,7 +166,7 @@ export default function useMyListings(uid) {
       },
       (error) => {
         console.warn(
-          "[useMyListings] Permission blocked or snapshot error",
+          "[useMyListings] Snapshot blocked or permission error",
           error
         );
         setListings([]);

@@ -1,76 +1,30 @@
 // ============================================================================
-// FILE: RequestCard.jsx — PHASE-2 FINAL (LOCKED & AUTHORITATIVE)
+// FILE: RequestCard.jsx
+// PHASE-2 FINAL — BUYER REQUEST CARD (DELIVERY-AUTHORITATIVE)
 // ============================================================================
 
 import React from "react";
 import { motion } from "framer-motion";
-import {
-  Trash,
-  Loader2,
-  Award,
-  Check,
-  X,
-} from "lucide-react";
+import { Trash, Loader2, Award, Check, X } from "lucide-react";
 import StatusBadge from "./StatusBadge";
 
 /* ------------------------------------------------------------
-   CONSTANTS — PHASE-2 CANONICAL
+   DELIVERY STATES THAT LOCK BUYER ACTIONS
 ------------------------------------------------------------ */
-
-// Delivery states where buyer actions are LOCKED
-const DELIVERY_LOCK = [
-  "recipientaccepted",
-  "accepted",
-  "addresssubmitted",
-  "pickupconfirmed",
-  "intransit",
+const LOCKED_DELIVERY = [
+  "pickup_scheduled",
+  "pickup_confirmed",
+  "in_transit",
+  "delivered",
   "completed",
-  "forceclosed",
+  "force_closed",
 ];
 
-// Allowed delete states (UI-only cleanup)
+/* ------------------------------------------------------------
+   DELETE-ALLOWED (UI-ONLY, PRE-AWARD)
+------------------------------------------------------------ */
 const ALLOW_DELETE = ["rejected", "cancelled", "expired"];
 
-/* ------------------------------------------------------------
-   IMAGE RESOLVER (SAFE)
------------------------------------------------------------- */
-const resolveImage = (item) => {
-  const donation = item.donation || item;
-
-  if (donation.images?.length) return donation.images[0];
-  if (donation.imageUrls?.length) return donation.imageUrls[0];
-  if (donation.image) return donation.image;
-  if (item.itemImages?.length) return item.itemImages[0];
-
-  return "/images/default-item.jpg";
-};
-
-/* ------------------------------------------------------------
-   TITLE & DESCRIPTION RESOLVER
------------------------------------------------------------- */
-const resolveTitle = (item) => {
-  const donation = item.donation || item;
-  return (
-    donation.title ||
-    donation.itemTitle ||
-    item.itemTitle ||
-    "Untitled Item"
-  );
-};
-
-const resolveDescription = (item) => {
-  const donation = item.donation || item;
-  return (
-    donation.description ||
-    donation.itemDescription ||
-    item.itemDescription ||
-    "No description available."
-  );
-};
-
-/* ------------------------------------------------------------
-   COMPONENT
------------------------------------------------------------- */
 export default function RequestCard({
   item,
   currentUser,
@@ -79,49 +33,46 @@ export default function RequestCard({
   onAwardAction,
   deleting,
 }) {
-  if (!item) return null;
+  if (!item || !currentUser) return null;
 
   const donation = item.donation || item;
-  const delivery = item.deliveryData || {};
 
-  // Premium items NEVER appear here
+  // 🔒 Premium never appears here
   if (donation.type === "premium" || item.isPremium) return null;
 
-  const userId = currentUser?.uid;
-  const isBuyer = userId === item.userId;
+  const delivery = item.deliveryData || {};
+  const isBuyer = currentUser.uid === item.userId;
+  const deliveryStatus = delivery.deliveryStatus || "";
 
   /* ------------------------------------------------------------
-     DELIVERY LOCK — BACKEND AUTHORITATIVE
+     LOCK STATE — PHASE-2 CANONICAL
   ------------------------------------------------------------ */
-  const normalizedDeliveryStatus = (
-    delivery.deliveryStatus ||
-    item.deliveryStatus ||
-    ""
-  )
-    .toLowerCase()
-    .replace(/[-_]/g, "");
-
-  const isLocked =
-    DELIVERY_LOCK.includes(normalizedDeliveryStatus) ||
-    !!delivery.deliveryAddress;
+  const isLocked = LOCKED_DELIVERY.includes(deliveryStatus);
 
   /* ------------------------------------------------------------
-     PERMISSIONS
+     BUYER ACTION GUARDS
   ------------------------------------------------------------ */
-
-  const canDelete =
-    ALLOW_DELETE.includes(item.status) &&
-    !isLocked &&
-    !delivery.deliveryStatus;
-
-  const canAccept =
-    item.status === "awarded" &&
+  const canAcceptAward =
     isBuyer &&
+    deliveryStatus === "pending_recipient_confirmation" &&
     !isLocked;
 
-  const img = resolveImage(item);
-  const title = resolveTitle(item);
-  const description = resolveDescription(item);
+  const canDelete =
+    isBuyer &&
+    ALLOW_DELETE.includes(item.status) &&
+    !delivery.deliveryStatus;
+
+  /* ------------------------------------------------------------
+     UI HELPERS
+  ------------------------------------------------------------ */
+  const img =
+    donation.images?.[0] ||
+    donation.imageUrls?.[0] ||
+    donation.image ||
+    "/images/default-item.jpg";
+
+  const title = donation.title || "Untitled Item";
+  const description = donation.description || "No description available.";
 
   const safeClick = (e) => {
     if (e.target.closest(".action-btn")) return;
@@ -129,14 +80,15 @@ export default function RequestCard({
   };
 
   const formatDate = () => {
-    try {
-      const date = item.updatedAt || donation.updatedAt;
-      if (date?.toDate) return date.toDate().toLocaleDateString();
-      if (date) return new Date(date).toLocaleDateString();
-    } catch {}
+    const d = item.updatedAt || donation.updatedAt;
+    if (d?.toDate) return d.toDate().toLocaleDateString();
+    if (d) return new Date(d).toLocaleDateString();
     return "—";
   };
 
+  /* ------------------------------------------------------------
+     RENDER
+  ------------------------------------------------------------ */
   return (
     <motion.div
       initial={{ opacity: 0, y: 18 }}
@@ -144,40 +96,37 @@ export default function RequestCard({
       onClick={safeClick}
       className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all cursor-pointer relative"
     >
-      {/* BUYER BADGE */}
-      {isBuyer && (
-        <div className="absolute bottom-3 left-3 bg-black/70 text-white text-[10px] px-2 py-1 rounded-full z-20">
-          Your Request
-        </div>
-      )}
+      {/* BUYER TAG */}
+      <div className="absolute bottom-3 left-3 bg-black/70 text-white text-[10px] px-2 py-1 rounded-full z-20">
+        Your Request
+      </div>
 
-      {/* AWARDED BADGE */}
-      {item.status === "awarded" && !isLocked && (
+      {/* AWARDED — AWAITING ACCEPTANCE */}
+      {canAcceptAward && (
         <div className="absolute top-3 left-3 bg-purple-600 text-white text-xs px-3 py-1.5 rounded-full font-semibold shadow-lg z-20 flex items-center gap-1">
           <Award size={12} />
-          AWARDED
+          Awarded
         </div>
       )}
 
-      {/* DELIVERY LOCK RIBBON */}
+      {/* DELIVERY ACTIVE */}
       {isLocked && (
-        <div className="absolute top-3 left-3 bg-red-600 text-white text-xs px-3 py-1.5 rounded-full font-semibold shadow-lg z-30">
-          Delivery In Progress
+        <div className="absolute top-3 left-3 bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-full font-semibold shadow-lg z-30">
+          Delivery in progress
         </div>
       )}
 
       {/* ACTION BUTTONS */}
       <div className="absolute top-3 right-3 z-30 flex gap-2">
-        {/* ACCEPT AWARD */}
-        {canAccept && (
+        {canAcceptAward && (
           <>
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onAwardAction(item, "accept");
+                onAwardAction?.(item, "accept");
               }}
-              className="action-btn bg-green-600 hover:bg-green-700 text-white p-2 rounded-full shadow transition hover:scale-110"
-              title="Accept item"
+              className="action-btn bg-emerald-600 hover:bg-emerald-700 text-white p-2 rounded-full shadow transition hover:scale-110"
+              title="Accept award"
             >
               <Check size={14} />
             </button>
@@ -185,17 +134,16 @@ export default function RequestCard({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onDelete?.();
+                onAwardAction?.(item, "decline");
               }}
               className="action-btn bg-gray-500 hover:bg-gray-600 text-white p-2 rounded-full shadow transition hover:scale-110"
-              title="Remove from my activity"
+              title="Decline award"
             >
               <X size={14} />
             </button>
           </>
         )}
 
-        {/* DELETE */}
         {canDelete && (
           <button
             onClick={(e) => {
@@ -221,10 +169,6 @@ export default function RequestCard({
           alt={title}
           loading="lazy"
           className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
-          onError={(e) => {
-            e.currentTarget.onerror = null;
-            e.currentTarget.src = "/images/default-item.jpg";
-          }}
         />
       </div>
 
@@ -239,15 +183,8 @@ export default function RequestCard({
         </p>
 
         <div className="flex items-center justify-between">
-          <StatusBadge
-            status={item.status}
-            deliveryStatus={
-              delivery.deliveryStatus || item.deliveryStatus
-            }
-          />
-          <span className="text-xs text-gray-500">
-            {formatDate()}
-          </span>
+          <StatusBadge deliveryStatus={deliveryStatus} />
+          <span className="text-xs text-gray-500">{formatDate()}</span>
         </div>
       </div>
     </motion.div>

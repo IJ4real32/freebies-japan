@@ -577,19 +577,46 @@ export default function Items() {
   setSubmitting(true);
 
   try {
-    // ✅ Phase-2: Idempotent backend request
-    const result = await onRequestCreateAddTicket({
-      itemId: item.id,
-    });
+    try {
+  console.log("🟡 [DEBUG] Requesting free item:", {
+    itemId: item.id,
+    userId: currentUser.uid,
+  });
 
-    if (result?.alreadyRequested) {
-      toast.success("📌 You already requested this item.");
-    } else if (result?.requestCreated) {
-      toast.success("✅ Request submitted successfully!");
-    } else if (!result?.ok) {
-      throw new Error("Request failed.");
-    }
+  const result = await onRequestCreateAddTicket({
+    itemId: item.id,
+  });
 
+  console.log("🟢 [DEBUG] Callable raw result:", result);
+  console.log("🟢 [DEBUG] Callable typeof:", typeof result);
+  console.log("🟢 [DEBUG] Callable keys:", result && Object.keys(result));
+
+  if (result?.alreadyRequested) {
+    toast.success("📌 You already requested this item.");
+  } else if (result?.requestCreated) {
+    toast.success("✅ Request submitted successfully!");
+  } else {
+    console.error("🔴 [DEBUG] Unexpected callable response:", result);
+    throw new Error("Request failed.");
+  }
+
+  await refreshItemData();
+  setViewItem(null);
+
+} catch (err) {
+  console.error("🔴 handleRequest error FULL:", {
+    err,
+    message: err?.message,
+    code: err?.code,
+    details: err?.details,
+    stack: err?.stack,
+  });
+  toast.error(err?.message || "Failed to submit request.");
+}
+
+
+
+   
     // ✅ Backend already deducted trial credit
     // → just refresh UI state
     await refreshItemData();

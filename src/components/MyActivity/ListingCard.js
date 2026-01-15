@@ -1,6 +1,6 @@
 // ============================================================================
-// FILE: ListingCard.jsx — PHASE-2 FINAL (ROLE-SAFE)
-// Seller-only delivery logic for MyActivity → Listings
+// FILE: ListingCard.jsx — PHASE-2 FINAL (ROLE-SAFE, CANONICAL)
+// Seller-only listing card (DISPLAY + NAVIGATION ONLY)
 // ============================================================================
 
 import React from "react";
@@ -13,7 +13,6 @@ import {
   Check,
 } from "lucide-react";
 import StatusBadge from "./StatusBadge";
-import SellerPickupScheduler from "../Logistics/SellerPickupScheduler";
 
 export default function ListingCard({
   item,
@@ -26,11 +25,15 @@ export default function ListingCard({
   if (!item || !currentUser) return null;
 
   /* ------------------------------------------------------------
-     SOURCE DATA (MyActivity structure)
+     SOURCE DATA (AUTHORITATIVE)
   ------------------------------------------------------------ */
   const listing = item.donation || item;
-  const delivery = item.deliveryData || null;
+  const delivery =
+  item.deliveryData && item.deliveryData.id
+    ? item.deliveryData
+    : null;
 
+ 
   const isSeller = listing.donorId === currentUser.uid;
   if (!isSeller) return null; // 🔒 HARD ROLE LOCK
 
@@ -46,34 +49,41 @@ export default function ListingCard({
     "/images/default-item.jpg";
 
   /* ------------------------------------------------------------
-     STATUS
+     STATUS (DISPLAY ONLY)
   ------------------------------------------------------------ */
-  const status = listing.status || "active";
+  const listingStatus = listing.status || "active";
 
   const canRelist =
-    ["expired", "completed", "closed", "sold", "cancelled"].includes(status) &&
-    !isLoading;
+    ["expired", "completed", "closed", "sold", "cancelled"].includes(
+      listingStatus
+    ) && !isLoading;
 
   /* ------------------------------------------------------------
-     PICKUP STATE (SELLER PIPELINE ONLY)
+     PICKUP BADGE (DISPLAY ONLY — PHASE-2 CANONICAL)
   ------------------------------------------------------------ */
   const pickupStatus = delivery?.pickupStatus || null;
 
   const hasPickupActivity =
-    pickupStatus &&
-    ["pending_seller_confirmation", "pickup_proposed", "pickup_confirmed"].includes(
-      pickupStatus
-    );
+  pickupStatus &&
+  [
+    "pickup_requested",
+    "pickup_scheduled",
+    "pickup_confirmed",
+    "in_transit",
+  ].includes(pickupStatus);
 
-  const bothConfirmed =
-    delivery?.buyerConfirmedAt && delivery?.sellerConfirmedAt;
+  const isCompleted =
+  delivery?.deliveryStatus === "completed";
+
+
+
 
   /* ------------------------------------------------------------
-     SAFE CLICK
+     SAFE CLICK (CARD NAVIGATION ONLY)
   ------------------------------------------------------------ */
   const safeClick = (e) => {
     if (e.target.closest(".action-btn")) return;
-    onView();
+    onView?.();
   };
 
   /* ------------------------------------------------------------
@@ -107,12 +117,12 @@ export default function ListingCard({
           }}
         />
 
-        {/* LISTING STATUS */}
+        {/* LISTING STATUS (TRACKING ONLY) */}
         <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded-full">
-          {status}
+          {listingStatus}
         </div>
 
-        {/* PICKUP BADGE */}
+        {/* PICKUP ACTIVITY BADGE */}
         {hasPickupActivity && isFreeItem && (
           <div className="absolute top-10 left-2 bg-indigo-600 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
             <Calendar size={10} />
@@ -120,8 +130,9 @@ export default function ListingCard({
           </div>
         )}
 
-        {/* COMPLETED */}
-        {bothConfirmed && (
+        {/* DELIVERY COMPLETED */}
+        {isCompleted && (
+
           <div className="absolute top-2 right-2 bg-green-700 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
             <Check size={10} />
             Completed
@@ -129,14 +140,14 @@ export default function ListingCard({
         )}
       </div>
 
-      {/* ACTIONS */}
+      {/* ACTION BUTTONS */}
       <div className="absolute top-3 right-3 flex gap-2 z-10">
         {canRelist && (
           <button
             className="action-btn bg-blue-600 text-white p-2 rounded-full"
             onClick={(e) => {
               e.stopPropagation();
-              onRelist();
+              onRelist?.();
             }}
           >
             <RefreshCw size={14} />
@@ -148,7 +159,7 @@ export default function ListingCard({
           className="action-btn bg-red-600 text-white p-2 rounded-full disabled:opacity-40"
           onClick={(e) => {
             e.stopPropagation();
-            onDelete();
+            onDelete?.();
           }}
         >
           {isLoading ? (
@@ -175,13 +186,12 @@ export default function ListingCard({
           </p>
         )}
 
-        {/* SELLER PICKUP PIPELINE */}
-        {isFreeItem && delivery && (
-          <SellerPickupScheduler delivery={delivery} />
-        )}
-
         <div className="flex justify-between items-center mt-3">
-          <StatusBadge status={status} />
+          {/* 🔑 DELIVERY IS AUTHORITATIVE FOR FREE ITEMS */}
+          <StatusBadge
+            deliveryStatus={delivery?.deliveryStatus}
+            isListing
+          />
           <span className="text-xs text-gray-500">
             {formatDate()}
           </span>

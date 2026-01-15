@@ -194,7 +194,6 @@ export default function RequestsAdmin() {
   const [actionBusy, setActionBusy] = useState({});
 
   // Cloud Functions
-  const [onAwardDonation] = useState(() => httpsCallable(functions, 'onAwardDonation'));
   const [onPremiumStatusAdvance] = useState(() => httpsCallable(functions, 'onPremiumStatusAdvance'));
   const [onPickupBooking] = useState(() => httpsCallable(functions, 'onPickupBooking'));
   const [sendUserNotification] = useState(() => httpsCallable(functions, 'sendUserNotification'));
@@ -340,13 +339,7 @@ export default function RequestsAdmin() {
     if (!window.confirm(`Approve ${req.userName} for "${req.itemTitle}"?`)) return;
     setActionBusy((s) => ({ ...s, [`approve-${req.id}`]: true }));
     try {
-      await adminUpdateRequestStatus({ requestId: req.id, status: "awarded" });
-      await sendAdminItemStatusEmail({
-        requestId: req.id,
-        userEmail: req.userEmail,
-        status: "awarded",
-        itemTitle: req.itemTitle,
-      });
+      await adminUpdateRequestStatus({ requestId: req.id, status: "approved" });
       toast.success(`✅ ${req.userName} approved for delivery.`);
     } catch (err) {
       console.error("Manual approve error:", err);
@@ -376,24 +369,6 @@ export default function RequestsAdmin() {
     }
   };
 
-  const handleMarkDelivered = async (req) => {
-    setActionBusy((s) => ({ ...s, [`deliver-${req.id}`]: true }));
-    try {
-      await adminUpdateRequestStatus({ requestId: req.id, status: "delivered" });
-      await sendAdminItemStatusEmail({
-        requestId: req.id,
-        userEmail: req.userEmail,
-        status: "delivered",
-        itemTitle: req.itemTitle,
-      });
-      toast.success(`📦 "${req.itemTitle}" marked delivered.`);
-    } catch (e) {
-      console.error("Mark delivered error:", e);
-      toast.error("Failed to mark delivered.");
-    } finally {
-      setActionBusy((s) => ({ ...s, [`deliver-${req.id}`]: false }));
-    }
-  };
 
   const handleRelistItem = async (req) => {
     if (!window.confirm(`Relist item "${req.itemTitle}" for new requests?`)) return;
@@ -450,69 +425,16 @@ export default function RequestsAdmin() {
     }
   };
 
-  /* --------------------------------------------------------
-   * 🎁 USER DONATION ACTIONS
-   * -------------------------------------------------------- */
-  const handleApproveDonation = async (donation) => {
-    if (!window.confirm(`Approve donation "${donation.title}" for listing?`)) return;
-    setActionBusy((s) => ({ ...s, [`approve-donation-${donation.id}`]: true }));
-    try {
-      await updateDoc(doc(db, "donations", donation.id), {
-        status: "active",
-        verified: true,
-        updatedAt: new Date()
-      });
-
-      await sendUserNotification({
-        userId: donation.donorId,
-        title: "Donation Approved!",
-        message: `Your donation "${donation.title}" has been approved and is now listed.`
-      });
-
-      toast.success(`✅ Donation approved and listed.`);
-    } catch (err) {
-      console.error("Approve donation error:", err);
-      toast.error("Failed to approve donation.");
-    } finally {
-      setActionBusy((s) => ({ ...s, [`approve-donation-${donation.id}`]: false }));
-    }
-  };
-
-  const handleRejectDonation = async (donation) => {
-    const reason = prompt("Reason for rejection:");
-    if (!reason) return;
-    
-    setActionBusy((s) => ({ ...s, [`reject-donation-${donation.id}`]: true }));
-    try {
-      await updateDoc(doc(db, "donations", donation.id), {
-        status: "rejected",
-        rejectionReason: reason,
-        updatedAt: new Date()
-      });
-
-      await sendUserNotification({
-        userId: donation.donorId,
-        title: "Donation Not Approved",
-        message: `Your donation "${donation.title}" was not approved. Reason: ${reason}`
-      });
-
-      toast.success(`❌ Donation rejected.`);
-    } catch (err) {
-      console.error("Reject donation error:", err);
-      toast.error("Failed to reject donation.");
-    } finally {
-      setActionBusy((s) => ({ ...s, [`reject-donation-${donation.id}`]: false }));
-    }
-  };
-
   const handleAwardDonation = async (donation, winnerRequest) => {
     if (!window.confirm(`Award "${donation.title}" to ${winnerRequest.userName}?`)) return;
     setActionBusy((s) => ({ ...s, [`award-${donation.id}`]: true }));
     try {
-      await onAwardDonation({
-        donationId: donation.id,
+      await updateDoc(doc(db, "donations", donation.id), {
+        status: "awarded",
+        awardedBy: "admin",
         winnerRequestId: winnerRequest.id,
-        winnerUserId: winnerRequest.userId
+        winnerUserId: winnerRequest.userId,
+        awardedAt: new Date()
       });
 
       toast.success(`🏆 Donation awarded to ${winnerRequest.userName}`);
@@ -972,32 +894,34 @@ export default function RequestsAdmin() {
                             <td className="px-4 py-3 text-right">
                               <div className="flex justify-end gap-2 flex-wrap">
                                 {item.status === "pending" && (
-                                  <>
-                                    <AdminButton
-                                      label="Approve"
-                                      onClick={() => handleManualApprove(item)}
-                                      busy={actionBusy[`approve-${item.id}`]}
-                                      color="green"
-                                      icon={CheckCircle}
-                                    />
-                                    <AdminButton
-                                      label="Reject"
-                                      onClick={() => handleRejectRequest(item)}
-                                      busy={actionBusy[`reject-${item.id}`]}
-                                      color="red"
-                                      icon={X}
-                                    />
-                                  </>
-                                )}
+  <>
+    <AdminButton
+      label="Award"
+      onClick={() => handleManualApprove(item)}
+      busy={actionBusy[`approve-${item.id}`]}
+      color="green"
+      icon={Award}
+    />
+
+    <AdminButton
+      label="Reject"
+      onClick={() => handleRejectRequest(item)}
+      busy={actionBusy[`reject-${item.id}`]}
+      color="red"
+      icon={X}
+    />
+  </>
+)}
+
+                              
+
                                 {["approved", "awarded"].includes(item.status) && (
                                   <>
-                                    <AdminButton
-                                      label="Delivered"
-                                      onClick={() => handleMarkDelivered(item)}
-                                      busy={actionBusy[`deliver-${item.id}`]}
-                                      color="blue"
-                                      icon={Truck}
-                                    />
+                                  <span className="text-xs text-gray-400 italic">
+  Delivery handled in Logistics
+</span>
+
+                                   
                                     <AdminButton
                                       label="Relist"
                                       onClick={() => handleRelistItem(item)}
@@ -1107,43 +1031,45 @@ export default function RequestsAdmin() {
                             <td className="px-4 py-3 text-right">
                               <div className="flex justify-end gap-2 flex-wrap">
                                 {item.status === "pending" && (
+  <>
+    <AdminButton
+      label="Award"
+      onClick={() => handleManualApprove(item)}
+      busy={actionBusy[`approve-${item.id}`]}
+      color="green"
+      icon={Award}
+    />
+
+    <AdminButton
+      label="Reject"
+      onClick={() => handleRejectRequest(item)}
+      busy={actionBusy[`reject-${item.id}`]}
+      color="red"
+      icon={X}
+    />
+  </>
+)}
+
+                              
+                               
+                                {["approved", "awarded"].includes(item.status) && (
                                   <>
+                                  <span className="text-xs text-gray-400 italic">
+  Delivery handled in Logistics
+</span>
+
+                                    
                                     <AdminButton
-                                      label="Approve"
-                                      onClick={() => handleApproveDonation(item)}
-                                      busy={actionBusy[`approve-donation-${item.id}`]}
-                                      color="green"
-                                      icon={CheckCircle}
-                                    />
-                                    <AdminButton
-                                      label="Reject"
-                                      onClick={() => handleRejectDonation(item)}
-                                      busy={actionBusy[`reject-donation-${item.id}`]}
-                                      color="red"
-                                      icon={X}
+                                      label="Relist"
+                                      onClick={() => handleRelistItem(item)}
+                                      busy={actionBusy[`relist-${item.id}`]}
+                                      color="purple"
+                                      icon={RefreshCcw}
                                     />
                                   </>
                                 )}
-                                {item.status === "active" && (
-                                  <AdminButton
-                                    label="Award"
-                                    onClick={() => {/* You would implement winner selection here */}}
-                                    busy={actionBusy[`award-${item.id}`]}
-                                    color="purple"
-                                    icon={Award}
-                                  />
-                                )}
-                                {item.delivery === "pickup" && (
-                                  <AdminButton
-                                    label="Schedule Pickup"
-                                    onClick={() => handleSchedulePickup(item)}
-                                    busy={actionBusy[`pickup-${item.id}`]}
-                                    color="orange"
-                                    icon={Truck}
-                                  />
-                                )}
                                 <AdminButton
-                                  label="View Donor"
+                                  label="View User"
                                   onClick={() => handleViewUser(item.donorId)}
                                   busy={actionBusy.view === item.donorId}
                                   color="gray"

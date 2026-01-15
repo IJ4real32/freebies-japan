@@ -9,29 +9,34 @@ import { functions } from "../../firebase";
 import toast from "react-hot-toast";
 import { Calendar, CheckCircle } from "lucide-react";
 
-export default function SellerPickupScheduler({ delivery }) {
+export default function SellerPickupScheduler({
+  delivery,
+  currentUserId,
+}) {
   const [dates, setDates] = useState([]);
   const [loading, setLoading] = useState(false);
 
   if (!delivery) return null;
 
   /* --------------------------------------------------
-   * PHASE-2 HARD GUARDS
+   * PHASE-2 HARD GUARDS (AUTHORITATIVE)
    * -------------------------------------------------- */
 
-  // Admin-sponsored items → seller never proposes pickup
-  if (delivery.donorType === "admin") return null;
+  // Seller only
+  if (!delivery.sellerId || delivery.sellerId !== currentUserId) return null;
 
-  // 🔑 PHASE-2: buyer MUST have submitted address
+  // Buyer MUST have submitted address
   if (delivery.addressSubmitted !== true) return null;
 
-  // 🔑 PHASE-2: pickup must be requested
+  // Canonical lifecycle state
   if (delivery.deliveryStatus !== "pickup_requested") return null;
 
-  // Seller may propose pickup ONLY ONCE
+  const pickupStatus = delivery.pickupStatus || null;
+
+  // One-time proposal only
   if (
-    delivery.pickupStatus === "pickup_scheduled" ||
-    delivery.pickupStatus === "pickup_confirmed"
+    pickupStatus === "pickup_scheduled" ||
+    pickupStatus === "pickup_confirmed"
   ) {
     return (
       <div className="flex items-center gap-2 text-sm text-gray-600">
@@ -46,7 +51,14 @@ export default function SellerPickupScheduler({ delivery }) {
    * -------------------------------------------------- */
   const submitPickupDates = async () => {
     if (!dates.length) {
-      toast.error("Please select at least one pickup date.");
+      toast.error("Please select a pickup date.");
+      return;
+    }
+
+    // 🔑 PHASE-2 CANONICAL REQUEST ID
+    const requestId = delivery.requestId || delivery.id;
+    if (!requestId) {
+      toast.error("Delivery reference missing.");
       return;
     }
 
@@ -56,14 +68,14 @@ export default function SellerPickupScheduler({ delivery }) {
       const fn = httpsCallable(functions, "submitSellerPickupOptions");
 
       await fn({
-        deliveryId: delivery.id,
+        requestId,
         pickupOptions: dates,
       });
 
-      toast.success("Pickup dates submitted");
+      toast.success("Pickup date submitted");
     } catch (err) {
-      console.error(err);
-      toast.error(err?.message || "Failed to submit pickup dates.");
+      console.error("submitSellerPickupOptions error:", err);
+      toast.error(err?.message || "Failed to submit pickup date.");
     } finally {
       setLoading(false);
     }
@@ -76,18 +88,32 @@ export default function SellerPickupScheduler({ delivery }) {
     <div className="mt-6 border rounded-lg p-4 bg-gray-50">
       <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
         <Calendar className="w-4 h-4" />
-        Propose Pickup Dates
+        Propose Pickup Date
       </h4>
 
       <input
         type="date"
-        onChange={(e) => setDates([e.target.value])}
+        onChange={(e) => {
+          const value = e.target.value;
+          if (!value) {
+            setDates([]);
+            return;
+          }
+
+          const date = new Date(`${value}T10:00:00`);
+          if (Number.isNaN(date.getTime())) {
+            toast.error("Invalid pickup date");
+            return;
+          }
+
+          setDates([date.toISOString()]);
+        }}
         className="border rounded px-3 py-2 text-sm w-full"
       />
 
       <button
         onClick={submitPickupDates}
-        disabled={loading}
+        disabled={loading || !dates.length}
         className="mt-3 w-full bg-blue-600 text-white py-2 rounded-lg text-sm disabled:opacity-50"
       >
         {loading ? "Submitting..." : "Submit Pickup Date"}

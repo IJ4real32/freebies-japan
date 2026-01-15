@@ -1,13 +1,13 @@
 // ===================================================================
 // AdminDeliveryActions.jsx
-// PHASE-2 FINAL — Admin delivery lifecycle controls
+// PHASE-2 FINAL — Admin delivery lifecycle controls (CANONICAL)
 // ===================================================================
 
 import React, { useState } from "react";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../../firebase";
 import toast from "react-hot-toast";
-import { Truck, XCircle } from "lucide-react";
+import { Truck } from "lucide-react";
 
 export default function AdminDeliveryActions({ delivery, isAdmin }) {
   const [loading, setLoading] = useState(false);
@@ -18,14 +18,14 @@ export default function AdminDeliveryActions({ delivery, isAdmin }) {
   if (!isAdmin) return null;
   if (!delivery) return null;
 
-  const isTerminal =
-    delivery.deliveryStatus === "completed" ||
-    delivery.deliveryStatus === "force_closed";
+  const isTerminal = ["completed", "force_closed", "cancelled"].includes(
+    delivery.deliveryStatus
+  );
 
-  // Only allow marking in transit AFTER pickup confirmed
+  // pickup_confirmed → in_transit ONLY
   const canMarkInTransit =
-    delivery.pickupStatus === "confirmed" &&
-    delivery.deliveryStatus !== "in_transit";
+    delivery.pickupStatus === "pickup_confirmed" &&
+    delivery.deliveryStatus === "pickup_requested";
 
   // --------------------------------------------------
   // MARK IN TRANSIT
@@ -55,68 +55,30 @@ export default function AdminDeliveryActions({ delivery, isAdmin }) {
   };
 
   // --------------------------------------------------
-  // FORCE CLOSE
-  // --------------------------------------------------
-  const handleForceClose = async () => {
-    const reason = prompt(
-      "Enter reason for force closing this delivery:"
-    );
+// UI
+// --------------------------------------------------
+if (isTerminal) return null;
 
-    if (!reason) return;
+return (
+  <div className="mt-4 p-4 border rounded-lg bg-slate-50">
+    <h4 className="text-sm font-semibold mb-3 text-slate-700">
+      Admin Delivery Actions
+    </h4>
 
-    setLoading(true);
-
-    try {
-      const forceClose = httpsCallable(
-        functions,
-        "adminForceCloseDelivery"
-      );
-
-      await forceClose({
-        requestId: delivery.requestId,
-        reason,
-      });
-
-      toast.success("Delivery force closed");
-    } catch (err) {
-      console.error(err);
-      toast.error(
-        err?.message || "Failed to force close delivery"
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="mt-4 p-4 border rounded-lg bg-white">
-      <h4 className="text-sm font-semibold mb-3">
-        Admin Delivery Actions
-      </h4>
-
-      <div className="flex flex-col gap-2">
-        {canMarkInTransit && (
-          <button
-            disabled={loading}
-            onClick={handleMarkInTransit}
-            className="flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded disabled:opacity-50"
-          >
-            <Truck size={16} />
-            Mark In Transit
-          </button>
-        )}
-
-        {!isTerminal && (
-          <button
-            disabled={loading}
-            onClick={handleForceClose}
-            className="flex items-center justify-center gap-2 px-3 py-2 bg-red-600 text-white rounded disabled:opacity-50"
-          >
-            <XCircle size={16} />
-            Force Close Delivery
-          </button>
-        )}
-      </div>
-    </div>
-  );
+    {canMarkInTransit ? (
+      <button
+        disabled={loading}
+        onClick={handleMarkInTransit}
+        className="flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded disabled:opacity-50"
+      >
+        <Truck size={16} />
+        Mark In Transit
+      </button>
+    ) : (
+      <p className="text-xs text-slate-500">
+        ⏳ Waiting for seller pickup confirmation before transit
+      </p>
+    )}
+  </div>
+);
 }
