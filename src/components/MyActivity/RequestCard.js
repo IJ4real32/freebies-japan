@@ -109,13 +109,6 @@ export default function RequestCard({
         </div>
       )}
 
-      {/* DELIVERY ACTIVE */}
-      {isLocked && (
-        <div className="absolute top-3 left-3 bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-full font-semibold shadow-lg z-30">
-          Delivery in progress
-        </div>
-      )}
-
       {/* ACTION BUTTONS */}
       <div className="absolute top-3 right-3 z-30 flex gap-2">
         {canAcceptAward && (
@@ -184,7 +177,9 @@ export default function RequestCard({
 
         <div className="flex items-center justify-between">
           <StatusBadge deliveryStatus={deliveryStatus} />
-          <span className="text-xs text-gray-500">{formatDate()}</span>
+          <span className="text-xs text-gray-500">
+            {formatDate()}
+          </span>
         </div>
       </div>
     </motion.div>

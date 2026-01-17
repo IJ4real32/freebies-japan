@@ -111,29 +111,29 @@ const freeConfig = {
   pending: {
     color: "bg-yellow-100 text-yellow-800 border-yellow-200",
     icon: Clock,
-    label: "Pending",
-    step: 0, // request created / awaiting award or acceptance
+    label: "Awaiting acceptance",
+    step: 0, // awarded, waiting for buyer
   },
 
   accepted: {
-    color: "bg-green-100 text-green-800 border-green-200",
+    color: "bg-blue-100 text-blue-800 border-blue-200",
     icon: UserCheck,
-    label: "Accepted",
-    step: 1, // buyer accepted award OR address submitted
+    label: "Accepted by buyer",
+    step: 1, // buyer accepted award / submitted address
   },
 
   in_transit: {
     color: "bg-purple-100 text-purple-800 border-purple-200",
-    icon: Truck,
-    label: "In Transit",
-    step: 3, // logistics in progress
+    icon: Package,
+    label: "Item handed over",
+    step: 3, // seller confirmed handoff
   },
 
   completed: {
-    color: "bg-teal-100 text-teal-800 border-teal-200",
+    color: "bg-green-100 text-green-800 border-green-200",
     icon: CheckCircle,
-    label: "Completed",
-    step: 4, // delivered & confirmed
+    label: "Item received",
+    step: 4, // buyer confirmed receipt
   },
 
   cancelled: {

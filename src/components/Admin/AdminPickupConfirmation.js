@@ -1,32 +1,32 @@
 // ===================================================================
 // AdminPickupConfirmation.jsx
-// PHASE-2 FINAL — Admin confirms seller pickup date (CANONICAL)
+// PHASE-2 FINAL — Admin confirms seller pickup option (CANONICAL)
+// BACKWARD COMPATIBLE (legacy date-only support)
 // ===================================================================
 
 import React, { useState } from "react";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../../firebase";
-import { Calendar, CheckCircle } from "lucide-react";
+import { Calendar, CheckCircle, Clock } from "lucide-react";
 import toast from "react-hot-toast";
 
+const DEFAULT_TIME_SLOT = "08:00-12:00";
+
 export default function AdminPickupConfirmation({ delivery, isAdmin }) {
-  const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedIdx, setSelectedIdx] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // --------------------------------------------------
-  // HARD GUARDS — PHASE-2 CANONICAL
-  // --------------------------------------------------
-  if (!isAdmin) return null;
-  if (!delivery) return null;
+  /* --------------------------------------------------
+   * HARD GUARDS — PHASE-2 CANONICAL
+   * -------------------------------------------------- */
+  if (!isAdmin || !delivery) return null;
 
-  // Address must be submitted
   const addressReady =
     delivery.addressSubmitted === true ||
     (!!delivery.deliveryAddress && !!delivery.deliveryPhone);
 
   if (!addressReady) return null;
 
-  // Seller must have proposed pickup dates
   if (
     !Array.isArray(delivery.sellerPickupOptions) ||
     delivery.sellerPickupOptions.length === 0
@@ -34,12 +34,8 @@ export default function AdminPickupConfirmation({ delivery, isAdmin }) {
     return null;
   }
 
-  // Only allow during pickup_requested phase
-  if (delivery.deliveryStatus !== "pickup_requested") {
-    return null;
-  }
+  if (delivery.deliveryStatus !== "pickup_requested") return null;
 
-  // Do not show if already confirmed or terminal
   if (
     delivery.pickupStatus === "pickup_confirmed" ||
     delivery.deliveryStatus === "completed" ||
@@ -48,18 +44,38 @@ export default function AdminPickupConfirmation({ delivery, isAdmin }) {
     return null;
   }
 
-  // --------------------------------------------------
-  // CONFIRM PICKUP DATE
-  // --------------------------------------------------
+  /* --------------------------------------------------
+   * CONFIRM PICKUP
+   * -------------------------------------------------- */
   const handleConfirm = async () => {
-    if (!selectedDate) {
-      toast.error("Please select a pickup date");
+    if (selectedIdx === null) {
+      toast.error("Please select a pickup option");
       return;
     }
 
-    setLoading(true);
+    const rawOption = delivery.sellerPickupOptions[selectedIdx];
+
+    // 🔑 BACKWARD-COMPAT NORMALIZATION
+    const date =
+      rawOption?.date?.seconds
+        ? new Date(rawOption.date.seconds * 1000)
+        : rawOption?.date
+        ? new Date(rawOption.date)
+        : new Date(rawOption);
+
+    if (Number.isNaN(date.getTime())) {
+      toast.error("Invalid pickup date");
+      return;
+    }
+
+    const selectedOption = {
+      date: date.toISOString().split("T")[0], // yyyy-mm-dd
+      timeSlot: rawOption?.timeSlot || DEFAULT_TIME_SLOT,
+    };
 
     try {
+      setLoading(true);
+
       const confirmPickup = httpsCallable(
         functions,
         "confirmPickupDate"
@@ -67,61 +83,76 @@ export default function AdminPickupConfirmation({ delivery, isAdmin }) {
 
       await confirmPickup({
         requestId: delivery.requestId,
-        selectedDate,
+        selectedOption,
       });
 
-      toast.success("Pickup date confirmed");
+      toast.success("Pickup confirmed");
     } catch (err) {
-      console.error(err);
+      console.error("confirmPickupDate error:", err);
       toast.error(
-        err?.message || "Failed to confirm pickup date"
+        err?.message || "Failed to confirm pickup"
       );
     } finally {
       setLoading(false);
     }
   };
 
-  // --------------------------------------------------
-  // UI
-  // --------------------------------------------------
+  /* --------------------------------------------------
+   * UI
+   * -------------------------------------------------- */
   return (
     <div className="mt-4 p-4 rounded-lg border bg-white">
       <h4 className="flex items-center gap-2 text-sm font-semibold mb-3">
         <Calendar className="w-4 h-4 text-blue-600" />
-        Confirm Seller Pickup Date
+        Confirm Seller Pickup
       </h4>
 
       <div className="space-y-2">
-        {delivery.sellerPickupOptions.map((dateValue, idx) => {
+        {delivery.sellerPickupOptions.map((opt, idx) => {
           const date =
-            typeof dateValue === "string"
-              ? new Date(dateValue)
-              : dateValue?.seconds
-              ? new Date(dateValue.seconds * 1000)
-              : new Date(dateValue);
+            opt?.date?.seconds
+              ? new Date(opt.date.seconds * 1000)
+              : opt?.date
+              ? new Date(opt.date)
+              : new Date(opt);
 
-          const value = date.toISOString();
+          const dateLabel = date.toLocaleDateString("ja-JP", {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+          });
+
+          const timeSlot = opt?.timeSlot || DEFAULT_TIME_SLOT;
 
           return (
             <label
               key={idx}
               className={`flex items-center gap-2 p-2 rounded border cursor-pointer ${
-                selectedDate === value
+                selectedIdx === idx
                   ? "border-blue-600 bg-blue-50"
                   : "border-gray-200"
               }`}
             >
               <input
                 type="radio"
-                name="pickupDate"
-                value={value}
-                checked={selectedDate === value}
-                onChange={() => setSelectedDate(value)}
+                name="pickupOption"
+                checked={selectedIdx === idx}
+                onChange={() => setSelectedIdx(idx)}
                 disabled={loading}
               />
-              <span className="text-sm">
-                {date.toLocaleDateString()}
-              </span>
+
+              <div className="flex flex-col text-sm">
+                <span>{dateLabel}</span>
+                <span className="text-xs text-gray-600 flex items-center gap-1">
+                  <Clock size={12} />
+                  {timeSlot}
+                  {!opt?.timeSlot && (
+                    <span className="text-amber-600 ml-1">
+                      (legacy)
+                    </span>
+                  )}
+                </span>
+              </div>
             </label>
           );
         })}
@@ -133,7 +164,7 @@ export default function AdminPickupConfirmation({ delivery, isAdmin }) {
         className="mt-4 w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-2 rounded disabled:opacity-50"
       >
         <CheckCircle size={16} />
-        Confirm Pickup Date
+        Confirm Pickup
       </button>
     </div>
   );

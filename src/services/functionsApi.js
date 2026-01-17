@@ -4,6 +4,8 @@
 
 import { getFunctions, httpsCallable } from "firebase/functions";
 import app, { auth } from "../firebase";
+import { functions } from "../firebase";
+
 
 // -----------------------------------------------------
 // Region-locked Functions Instance
@@ -478,4 +480,16 @@ export const ping = async () => {
   }
 
   return res.json();
+};
+// =====================================================
+// FREE ITEM — SELLER HANDOFF CONFIRMATION (PHASE-2)
+// =====================================================
+export const sellerConfirmDelivery = async ({ requestId }) => {
+  if (!requestId) {
+    throw new Error("requestId is required");
+  }
+
+  const fn = httpsCallable(functions, "sellerConfirmDelivery");
+  const res = await fn({ requestId });
+  return res.data;
 };

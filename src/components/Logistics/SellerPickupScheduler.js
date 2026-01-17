@@ -1,19 +1,31 @@
 // ===================================================================
 // SellerPickupScheduler.js
-// PHASE-2 CANONICAL — Seller proposes pickup dates
+// PHASE-2 CANONICAL — Seller proposes pickup date + time slot
 // ===================================================================
 
 import React, { useState } from "react";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../../firebase";
 import toast from "react-hot-toast";
-import { Calendar, CheckCircle } from "lucide-react";
+import { Calendar, CheckCircle, Clock } from "lucide-react";
+
+/* ------------------------------------------------------------------
+ * PHASE-2 CANONICAL TIME SLOTS (MUST MATCH BACKEND)
+ * ------------------------------------------------------------------ */
+const TIME_SLOTS = [
+  "08:00-12:00",
+  "12:00-14:00",
+  "14:00-16:00",
+  "16:00-18:00",
+  "18:00-20:00",
+];
 
 export default function SellerPickupScheduler({
   delivery,
   currentUserId,
 }) {
-  const [dates, setDates] = useState([]);
+  const [date, setDate] = useState("");
+  const [timeSlot, setTimeSlot] = useState(TIME_SLOTS[0]); // default
   const [loading, setLoading] = useState(false);
 
   if (!delivery) return null;
@@ -49,13 +61,12 @@ export default function SellerPickupScheduler({
   /* --------------------------------------------------
    * HANDLERS
    * -------------------------------------------------- */
-  const submitPickupDates = async () => {
-    if (!dates.length) {
+  const submitPickup = async () => {
+    if (!date) {
       toast.error("Please select a pickup date.");
       return;
     }
 
-    // 🔑 PHASE-2 CANONICAL REQUEST ID
     const requestId = delivery.requestId || delivery.id;
     if (!requestId) {
       toast.error("Delivery reference missing.");
@@ -69,13 +80,18 @@ export default function SellerPickupScheduler({
 
       await fn({
         requestId,
-        pickupOptions: dates,
+        pickupOptions: [
+          {
+            date,       // YYYY-MM-DD
+            timeSlot,   // PHASE-2 REQUIRED
+          },
+        ],
       });
 
-      toast.success("Pickup date submitted");
+      toast.success("Pickup proposal submitted");
     } catch (err) {
       console.error("submitSellerPickupOptions error:", err);
-      toast.error(err?.message || "Failed to submit pickup date.");
+      toast.error(err?.message || "Failed to submit pickup proposal.");
     } finally {
       setLoading(false);
     }
@@ -86,37 +102,45 @@ export default function SellerPickupScheduler({
    * -------------------------------------------------- */
   return (
     <div className="mt-6 border rounded-lg p-4 bg-gray-50">
-      <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+      <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
         <Calendar className="w-4 h-4" />
-        Propose Pickup Date
+        Propose Pickup
       </h4>
 
+      {/* DATE */}
+      <label className="block text-xs text-gray-600 mb-1">
+        Pickup Date
+      </label>
       <input
         type="date"
-        onChange={(e) => {
-          const value = e.target.value;
-          if (!value) {
-            setDates([]);
-            return;
-          }
-
-          const date = new Date(`${value}T10:00:00`);
-          if (Number.isNaN(date.getTime())) {
-            toast.error("Invalid pickup date");
-            return;
-          }
-
-          setDates([date.toISOString()]);
-        }}
-        className="border rounded px-3 py-2 text-sm w-full"
+        value={date}
+        onChange={(e) => setDate(e.target.value)}
+        className="border rounded px-3 py-2 text-sm w-full mb-3"
       />
 
-      <button
-        onClick={submitPickupDates}
-        disabled={loading || !dates.length}
-        className="mt-3 w-full bg-blue-600 text-white py-2 rounded-lg text-sm disabled:opacity-50"
+      {/* TIME SLOT */}
+      <label className="block text-xs text-gray-600 mb-1 flex items-center gap-1">
+        <Clock className="w-3 h-3" />
+        Time Slot
+      </label>
+      <select
+        value={timeSlot}
+        onChange={(e) => setTimeSlot(e.target.value)}
+        className="border rounded px-3 py-2 text-sm w-full"
       >
-        {loading ? "Submitting..." : "Submit Pickup Date"}
+        {TIME_SLOTS.map((slot) => (
+          <option key={slot} value={slot}>
+            {slot}
+          </option>
+        ))}
+      </select>
+
+      <button
+        onClick={submitPickup}
+        disabled={loading || !date}
+        className="mt-4 w-full bg-blue-600 text-white py-2 rounded-lg text-sm disabled:opacity-50"
+      >
+        {loading ? "Submitting..." : "Submit Pickup Proposal"}
       </button>
     </div>
   );

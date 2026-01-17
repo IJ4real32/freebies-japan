@@ -12,12 +12,12 @@ import {
   Truck,
   CheckCircle,
   Clock,
-  Home,
 } from "lucide-react";
 
 import StatusBadge from "../StatusBadge";
 import SellerPickupScheduler from "../../Logistics/SellerPickupScheduler";
 import RecipientConfirmDelivery from "../RecipientConfirmDelivery";
+import SellerConfirmHandoff from "../SellerConfirmHandoff";
 
 export default function DetailDrawerFree({
   open,
@@ -46,19 +46,16 @@ export default function DetailDrawerFree({
    * ------------------------------------------------- */
   const hasAddress = delivery.addressSubmitted === true;
   const isClosed =
-  deliveryStatus === "completed" ||
-  deliveryStatus === "force_closed";
+    deliveryStatus === "completed" ||
+    deliveryStatus === "force_closed";
 
   /* -------------------------------------------------
    * ACTION GUARDS (PHASE-2 CANONICAL)
    * ------------------------------------------------- */
   const canAcceptAward =
-  isBuyer &&
-  deliveryStatus === "pending_recipient_confirmation" &&
-  !isClosed;
-
- 
-
+    isBuyer &&
+    deliveryStatus === "pending_recipient_confirmation" &&
+    !isClosed;
 
   const canSubmitAddress =
     isBuyer &&
@@ -71,27 +68,35 @@ export default function DetailDrawerFree({
     deliveryStatus === "pickup_requested" &&
     !isClosed;
 
-  const canConfirmDelivery =
+  // 🔑 Seller confirms handoff (THIS UNBLOCKS FLOW)
+  const canSellerConfirmHandoff =
+    isSeller &&
+    deliveryStatus === "in_transit" &&
+    delivery.sellerConfirmed !== true &&
+    !isClosed;
+
+  // 🔑 Buyer confirms receipt (FINAL STEP)
+  const canBuyerConfirmReceipt =
     isBuyer &&
-    deliveryStatus === "delivered" &&
+    deliveryStatus === "in_transit" &&
     delivery.buyerConfirmed !== true &&
     !isClosed;
 
   /* -------------------------------------------------
-   * DELIVERY TIMELINE (READ-ONLY, ACCURATE)
+   * DELIVERY TIMELINE (AUTHORITATIVE)
    * ------------------------------------------------- */
   const timeline = [
     {
       label: "Award accepted",
       icon: Award,
-     done: deliveryStatus === "awaiting_address" ||
-      deliveryStatus === "pickup_requested" ||
-      deliveryStatus === "pickup_scheduled" ||
-      deliveryStatus === "pickup_confirmed" ||
-      deliveryStatus === "in_transit" ||
-      deliveryStatus === "delivered" ||
-      deliveryStatus === "completed",
-
+      done: [
+        "awaiting_address",
+        "pickup_requested",
+        "pickup_scheduled",
+        "pickup_confirmed",
+        "in_transit",
+        "completed",
+      ].includes(deliveryStatus),
     },
     {
       label: "Address submitted",
@@ -101,21 +106,22 @@ export default function DetailDrawerFree({
     {
       label: "Pickup scheduled",
       icon: Calendar,
-      done: ["pickup_scheduled", "pickup_confirmed", "in_transit", "delivered", "completed"].includes(
-        deliveryStatus
-      ),
+      done: [
+        "pickup_scheduled",
+        "pickup_confirmed",
+        "in_transit",
+        "completed",
+      ].includes(deliveryStatus),
     },
     {
       label: "In transit",
       icon: Truck,
-      done: ["in_transit", "delivered", "completed"].includes(
-        deliveryStatus
-      ),
+      done: ["in_transit", "completed"].includes(deliveryStatus),
     },
     {
-      label: "Delivered",
+      label: "Item received",
       icon: CheckCircle,
-      done: ["delivered", "completed"].includes(deliveryStatus),
+      done: deliveryStatus === "completed",
     },
   ];
 
@@ -125,7 +131,6 @@ export default function DetailDrawerFree({
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex justify-end">
       <div className="bg-white w-full max-w-md h-full overflow-y-auto shadow-xl">
-
         {/* HEADER */}
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <h2 className="text-lg font-semibold">Item details</h2>
@@ -135,7 +140,6 @@ export default function DetailDrawerFree({
         </div>
 
         <div className="p-4 space-y-6">
-
           {donation.images?.[0] && (
             <img
               src={donation.images[0]}
@@ -157,6 +161,7 @@ export default function DetailDrawerFree({
             isListing={false}
           />
 
+          {/* TIMELINE */}
           <div>
             <h4 className="text-sm font-semibold mb-3 text-gray-700">
               Delivery progress
@@ -196,6 +201,7 @@ export default function DetailDrawerFree({
             </div>
           </div>
 
+          {/* BUYER: ACCEPT / DECLINE AWARD */}
           {canAcceptAward && (
             <div className="pt-4 border-t">
               <p className="text-sm text-gray-600 mb-3">
@@ -218,6 +224,7 @@ export default function DetailDrawerFree({
             </div>
           )}
 
+          {/* BUYER: SUBMIT ADDRESS */}
           {canSubmitAddress && (
             <div className="pt-4 border-t">
               <button
@@ -229,17 +236,26 @@ export default function DetailDrawerFree({
             </div>
           )}
 
-         {canSellerSchedulePickup && (
-  <SellerPickupScheduler
-    delivery={delivery}
-    currentUserId={currentUser?.uid}
-  />
-)}
+          {/* SELLER: PROPOSE PICKUP */}
+          {canSellerSchedulePickup && (
+            <SellerPickupScheduler
+              delivery={delivery}
+              currentUserId={currentUser?.uid}
+            />
+          )}
 
+          {/* SELLER: CONFIRM HANDOFF */}
+          {canSellerConfirmHandoff && (
+            <SellerConfirmHandoff
+              delivery={delivery}
+              onDone={onClose}
+            />
+          )}
 
-          {canConfirmDelivery && (
+          {/* BUYER: CONFIRM RECEIPT */}
+          {canBuyerConfirmReceipt && (
             <RecipientConfirmDelivery
-              request={item}
+              donation={delivery}
               onDone={onClose}
             />
           )}

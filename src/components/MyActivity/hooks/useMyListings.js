@@ -34,12 +34,11 @@ const TERMINAL_DELIVERY_STATES = [
 /* ------------------------------------------------------------
  * HELPERS
  * ---------------------------------------------------------- */
-const isActiveDelivery = (delivery) => {
+const isRelevantDelivery = (delivery) => {
   if (!delivery?.deliveryStatus) return false;
-  return !TERMINAL_DELIVERY_STATES.includes(
-    delivery.deliveryStatus
-  );
+  return true; // 🔒 terminal deliveries are STILL authoritative
 };
+
 
 export default function useMyListings(uid) {
   const [listings, setListings] = useState([]);
@@ -99,10 +98,8 @@ export default function useMyListings(uid) {
                       doc(db, "deliveryDetails", reqDoc.id)
                     );
 
-                    if (
-                      deliverySnap.exists() &&
-                      isActiveDelivery(deliverySnap.data())
-                    ) {
+                    if (deliverySnap.exists()) {
+
                       activeRequestId = reqDoc.id;
                       deliveryData = {
                         id: deliverySnap.id,
@@ -115,32 +112,51 @@ export default function useMyListings(uid) {
                 }
               }
 
-              /* ----------------------------------------------
-               * B️⃣ CANONICAL SELLER DELIVERY DISCOVERY
-               * -------------------------------------------- */
-              if (!activeRequestId) {
-                try {
-                  const deliverySnap = await getDocs(
-                    query(
-                      collection(db, "deliveryDetails"),
-                      where("itemId", "==", donation.id),
-                      where("sellerId", "==", uid)
-                    )
-                  );
+/* ----------------------------------------------
+ * B️⃣ CANONICAL SELLER DELIVERY DISCOVERY
+ * -------------------------------------------- */
 
-                  for (const d of deliverySnap.docs) {
-                    const data = d.data();
+if (!activeRequestId) {
+  try {
+    const deliverySnap = await getDocs(
+      query(
+        collection(db, "deliveryDetails"),
+        where("itemId", "==", donation.id),
+        where("sellerId", "==", uid)
+      )
+    );
 
-                    if (isActiveDelivery(data)) {
-                      activeRequestId = d.id;
-                      deliveryData = {
-                        id: d.id,
-                        ...data,
-                      };
-                      break;
-                    }
-                  }
-                } catch {
+    let completedFallback = null;
+
+    for (const d of deliverySnap.docs) {
+      const data = d.data();
+
+      // ✅ Active delivery (highest priority)
+      if (isRelevantDelivery(data)) {
+
+        activeRequestId = d.id;
+        deliveryData = {
+          id: d.id,
+          ...data,
+        };
+        break;
+      }
+
+      // 🧠 Fallback: remember completed delivery
+      if (data.deliveryStatus === "completed") {
+        completedFallback = {
+          id: d.id,
+          ...data,
+        };
+      }
+    }
+
+    // ✅ Attach completed delivery if no active one exists
+    if (!deliveryData && completedFallback) {
+      deliveryData = completedFallback;
+      activeRequestId = completedFallback.id;
+    }
+  } catch {
                   // permission-safe no-op
                 }
               }

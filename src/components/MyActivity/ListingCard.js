@@ -29,11 +29,10 @@ export default function ListingCard({
   ------------------------------------------------------------ */
   const listing = item.donation || item;
   const delivery =
-  item.deliveryData && item.deliveryData.id
-    ? item.deliveryData
-    : null;
+    item.deliveryData && item.deliveryData.id
+      ? item.deliveryData
+      : null;
 
- 
   const isSeller = listing.donorId === currentUser.uid;
   if (!isSeller) return null; // 🔒 HARD ROLE LOCK
 
@@ -64,19 +63,16 @@ export default function ListingCard({
   const pickupStatus = delivery?.pickupStatus || null;
 
   const hasPickupActivity =
-  pickupStatus &&
-  [
-    "pickup_requested",
-    "pickup_scheduled",
-    "pickup_confirmed",
-    "in_transit",
-  ].includes(pickupStatus);
+    pickupStatus &&
+    [
+      "pickup_requested",
+      "pickup_scheduled",
+      "pickup_confirmed",
+      "in_transit",
+    ].includes(pickupStatus);
 
   const isCompleted =
-  delivery?.deliveryStatus === "completed";
-
-
-
+    delivery?.deliveryStatus === "completed";
 
   /* ------------------------------------------------------------
      SAFE CLICK (CARD NAVIGATION ONLY)
@@ -132,7 +128,6 @@ export default function ListingCard({
 
         {/* DELIVERY COMPLETED */}
         {isCompleted && (
-
           <div className="absolute top-2 right-2 bg-green-700 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
             <Check size={10} />
             Completed

@@ -1,51 +1,57 @@
 // ========================================================================
-// FILE: src/components/MyActivity/RecipientConfirmDelivery.js
-// PHASE-2 FINAL — Backend-authoritative recipient confirmation
+// FILE: src/components/MyActivity/RecipientConfirmDelivery.jsx
+// PHASE-2 FINAL — Buyer confirms item receipt (FREE ITEMS)
 // ========================================================================
 
 import React, { useState } from "react";
-import { recipientConfirmDelivery } from "../../services/functionsApi";
-import { CheckCircle, XCircle, Loader2 } from "lucide-react";
+import { httpsCallable } from "firebase/functions";
+import { functions } from "../../firebase";
+import { CheckCircle, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 
-const RecipientConfirmDelivery = ({ donation, onDone }) => {
+const RecipientConfirmDelivery = ({ delivery, currentUserId, onDone }) => {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
-  if (!donation) return null;
+  if (!delivery) return null;
 
-  const handleConfirm = async (accepted) => {
-    if (!donation.id) {
-      setError("Invalid donation reference.");
+  // --------------------------------------------------
+  // HARD GUARDS — PHASE-2 CANONICAL
+  // --------------------------------------------------
+
+  // Buyer only
+  if (delivery.buyerId !== currentUserId) return null;
+
+  // Only during transit
+  if (delivery.deliveryStatus !== "in_transit") return null;
+
+  // Already confirmed
+  if (delivery.buyerConfirmed === true) return null;
+
+  const handleConfirm = async () => {
+    if (!delivery.requestId) {
+      toast.error("Invalid delivery reference");
       return;
     }
 
     setLoading(true);
-    setError("");
 
     try {
-      await recipientConfirmDelivery({
-        donationId: donation.id, // ✅ PHASE-2 AUTHORITATIVE
-        accepted,
-        estimatedCost:
-          donation.deliveryCostEstimate ??
-          donation.estimatedDelivery?.max ??
-          donation.estimatedDelivery?.min ??
-          null,
-      });
-
-      toast.success(
-        accepted
-          ? "✅ Delivery accepted. Pickup scheduling will begin."
-          : "❌ You declined this item."
+      const confirmFn = httpsCallable(
+        functions,
+        "recipientConfirmDelivery"
       );
 
-      onDone?.(donation);
+      await confirmFn({
+        requestId: delivery.requestId,
+      });
+
+      toast.success("✅ Item marked as received");
+
+      onDone?.(delivery);
     } catch (err) {
-      console.error("❌ RecipientConfirmDelivery error:", err);
-      setError(
-        err?.message ||
-          "Failed to confirm delivery. Please try again."
+      console.error("recipientConfirmDelivery error:", err);
+      toast.error(
+        err?.message || "Failed to confirm item receipt"
       );
     } finally {
       setLoading(false);
@@ -53,44 +59,23 @@ const RecipientConfirmDelivery = ({ donation, onDone }) => {
   };
 
   return (
-    <div className="mt-4 p-4 border rounded-lg bg-gray-50">
-      <p className="text-sm text-gray-700 mb-3">
-        Please confirm whether you want to receive this item and proceed with delivery.
+    <div className="mt-4 p-4 border rounded-lg bg-green-50">
+      <p className="text-sm text-green-800 mb-3">
+        Please confirm once you have received this item from the seller.
       </p>
 
-      {error && (
-        <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 p-2 rounded">
-          {error}
-        </div>
-      )}
-
-      <div className="flex gap-3">
-        <button
-          disabled={loading}
-          onClick={() => handleConfirm(true)}
-          className="flex-1 py-2 bg-green-600 text-white rounded-lg flex items-center justify-center gap-2 disabled:opacity-60"
-        >
-          {loading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <CheckCircle className="w-4 h-4" />
-          )}
-          Accept & Proceed
-        </button>
-
-        <button
-          disabled={loading}
-          onClick={() => handleConfirm(false)}
-          className="flex-1 py-2 bg-red-600 text-white rounded-lg flex items-center justify-center gap-2 disabled:opacity-60"
-        >
-          {loading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <XCircle className="w-4 h-4" />
-          )}
-          Decline
-        </button>
-      </div>
+      <button
+        disabled={loading}
+        onClick={handleConfirm}
+        className="w-full py-2 bg-green-600 text-white rounded-lg flex items-center justify-center gap-2 disabled:opacity-60"
+      >
+        {loading ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : (
+          <CheckCircle className="w-4 h-4" />
+        )}
+        I have received the item
+      </button>
     </div>
   );
 };
